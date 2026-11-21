@@ -83,8 +83,9 @@ pub fn rank(apps: &[App], query: &str, limit: usize) -> Vec<Item> {
     hits.sort_by(|(a, x), (b, y)| b.score.cmp(&a.score).then_with(|| x.name.cmp(&y.name)));
     hits.truncate(limit);
     hits.into_iter()
-        .map(|(m, app)| {
-            Item::path(
+        .map(|(m, app)| Item {
+            icon: Some(app.icon.clone()),
+            ..Item::path(
                 ItemKind::Application,
                 app.path.clone(),
                 app.name.clone(),
@@ -198,5 +199,17 @@ mod tests {
         let titles: Vec<_> = rank(&apps, "saf", 10).into_iter().map(|i| i.title).collect();
         assert_eq!(titles, ["Safari", "Safari Technology Preview", "Hush Safe"]);
         assert_eq!(rank(&apps, "saf", 1).len(), 1);
+    }
+
+    #[test]
+    fn results_open_the_link_but_show_the_bundles_icon() {
+        let app = App {
+            name: "Safari".into(),
+            path: PathBuf::from("/Applications/Safari.app"),
+            icon: PathBuf::from("/System/Volumes/Preboot/Cryptexes/App/System/Applications/Safari.app"),
+        };
+        let item = rank(std::slice::from_ref(&app), "saf", 1).remove(0);
+        assert_eq!(item.primary, dupin_core::Action::Open(app.path.clone()));
+        assert_eq!(item.icon, Some(app.icon));
     }
 }
