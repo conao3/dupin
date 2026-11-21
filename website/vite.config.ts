@@ -1,5 +1,6 @@
 import { cloudflare } from '@cloudflare/vite-plugin';
-import { defineConfig, runnerImport } from 'vite';
+import { readFileSync } from 'node:fs';
+import { defineConfig, runnerImport, type Plugin } from 'vite';
 import { oxContent } from '@ox-content/vite-plugin';
 import { cloudflareRedirect } from '@ryoppippi/vite-plugin-cloudflare-redirect';
 import type * as Theme from './theme/index.ts';
@@ -14,9 +15,21 @@ const {
 	module: { theme },
 } = await runnerImport<typeof Theme>('./theme/index.ts', { configFile: false });
 
+const favicon: Plugin = {
+	name: 'dupin-favicon',
+	generateBundle() {
+		this.emitFile({
+			type: 'asset',
+			fileName: 'favicon.svg',
+			source: readFileSync(new URL('../assets/logo/dupin.svg', import.meta.url)),
+		});
+	},
+};
+
 export default defineConfig({
 	plugins: [
 		cloudflare(),
+		favicon,
 		cloudflareRedirect({
 			mode: 'generate',
 			entries: [

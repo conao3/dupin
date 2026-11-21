@@ -82,4 +82,4 @@ just website::lint    # oxlint, type-aware and type-checked through tsrs
 just website::deploy  # cf build, then upload the result as Cloudflare static assets
 ```
 
-Building and deploying go through `cf`, with the Cloudflare Vite plugin producing the Build Output. Workers Builds runs `pnpm run deploy` on `main` (the `dupin` Worker on `dupin.app`) and `cf previews deploy` on other branches, whenever `website/` changes. `dupin.app/gh` redirects to the repository; the redirects are declared in `website/vite.config.ts`.
+Building and deploying go through `cf`, with the Cloudflare Vite plugin producing the Build Output. Workers Builds runs `pnpm run deploy` on `main` (the `dupin` Worker on `dupin.app`) and `cf previews deploy` on other branches, whenever `website/` or `assets/logo/` changes. `dupin.app/gh` redirects to the repository; the redirects are declared in `website/vite.config.ts`.

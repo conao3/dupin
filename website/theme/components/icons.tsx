@@ -1,18 +1,13 @@
+import { raw } from '@ox-content/vite-plugin';
+import { readFileSync } from 'node:fs';
+
+// The mark is square with the glasses across its middle; crop the viewBox to the glasses for the nav.
+const mark = readFileSync(new URL('../../../assets/logo/dupin-mark.svg', import.meta.url), 'utf8')
+	.replace(/ width="\d+" height="\d+"/, '')
+	.replace(/viewBox="[^"]*"/, 'viewBox="100 350 870 415" class="logo" aria-hidden="true"');
+
 export function Logo() {
-	return (
-		<svg class="logo" viewBox="160 380 720 330" aria-hidden="true">
-			<g
-				fill="none"
-				stroke="currentColor"
-				stroke-width="58"
-				stroke-linecap="round"
-				stroke-linejoin="round"
-			>
-				<path d="M446 487Q512 427 574 487M791 592L850 685" />
-				<path d="M204 430L372 409L443 482L423 592L263 620L193 548ZM594 432L754 409L823 482L805 592L645 620L575 548Z" />
-			</g>
-		</svg>
-	);
+	return raw(mark);
 }
 
 export function GitHubIcon() {
