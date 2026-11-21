@@ -107,6 +107,15 @@ impl Session {
         self.results
     }
 
+    /// Select the result with this id, as a click on its row does. False when it's gone.
+    pub fn select_id(&mut self, id: &str) -> bool {
+        let Some(i) = self.items.iter().position(|item| item.id == id) else {
+            return false;
+        };
+        self.selected = i;
+        true
+    }
+
     /// The text field's contents changed.
     pub fn set_query(&mut self, text: &str) -> Vec<Effect> {
         if text == self.query {

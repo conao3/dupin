@@ -218,3 +218,15 @@ fn escape_hides_and_resets_file_mode() {
     assert_eq!(s.intent(Intent::Dismiss), Some(vec![Effect::Hide]));
     assert_eq!(s.mode(), Mode::Apps);
 }
+
+#[test]
+fn a_click_selects_by_id_even_after_rows_move() {
+    let mut s = Session::default();
+    let g = searched(&s.set_query("a")).1;
+    let items = ["A", "B", "C"].map(|n| item(ItemKind::Application, n)).to_vec();
+    s.deliver(Delivery::Batch { generation: g, items });
+    assert!(s.select_id("/x/C"));
+    assert_eq!(s.selected_item().unwrap().title, "C");
+    assert!(!s.select_id("/x/gone"));
+    assert_eq!(s.selected(), 2);
+}
