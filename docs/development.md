@@ -69,3 +69,17 @@ Scripts in this repository are written in Nushell.
 ## Logo
 
 `assets/logo/dupin.svg` is the app icon and `assets/logo/dupin-mark.svg` a monochrome `currentColor` mark, for template images such as a menu-bar item. They are the only tracked logo sources: the Nix build draws every icon size from `dupin.svg` with resvg and packs them with icnsutil, so no generated PNG or icns is committed.
+
+## Website
+
+`website/` holds the landing page for <https://dupin.app>: an [ox-content](https://github.com/ubugeeei-prod/ox-content) static site with its own pnpm project. The page layout is JSX in `website/theme/`; the install steps are Markdown in `website/content/index.md`. The development shell provides Node.js and the pnpm version that `website/package.json` pins (`nix flake check` fails when they differ).
+
+```sh
+just website::install # dependencies from the lockfile
+just website::dev     # local server (ox-content's dev server uses its default theme, not website/theme/)
+just website::preview # build, then serve the real page with the redirects
+just website::lint    # oxlint, type-aware and type-checked through tsrs
+just website::deploy  # cf build, then upload the result as Cloudflare static assets
+```
+
+Building and deploying go through `cf`, with the Cloudflare Vite plugin producing the Build Output. Workers Builds runs `pnpm run deploy` on `main` (the `dupin` Worker on `dupin.app`) and `cf previews deploy` on other branches, whenever `website/` or `assets/logo/` changes. `dupin.app/gh` redirects to the repository; the redirects are declared in `website/vite.config.ts`.
