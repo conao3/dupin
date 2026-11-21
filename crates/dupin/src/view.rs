@@ -88,8 +88,12 @@ pub fn view(s: &Ui, cx: &mut Cx<Ui>) -> El {
 }
 
 fn header(s: &Ui, t: &tok::Theme, accent: Color) -> El {
-    let files = s.session.mode() == Mode::Files;
-    let placeholder = if files { "Search files" } else { "Search apps" };
+    let mode = s.session.mode();
+    let (placeholder, chip) = match mode {
+        Mode::Apps => ("Search apps", None),
+        Mode::Files => ("Search files", Some("Files")),
+        Mode::Contents => ("Search inside files", Some("In files")),
+    };
     let field = text_input(&s.query, TextStyle::new(22.0, 400.0).lh(30.0))
         .key("query")
         .label(placeholder)
@@ -107,8 +111,8 @@ fn header(s: &Ui, t: &tok::Theme, accent: Color) -> El {
         .px(18.0)
         .gap(12.0)
         .center_y();
-    bar = if files {
-        // The mode chip: Space on an empty query put us here, Backspace takes us back.
+    bar = if let Some(chip) = chip {
+        // The mode chip: Space or the `in` keyword put us here, Backspace takes us back.
         bar.child(
             row()
                 .key("mode")
@@ -117,7 +121,7 @@ fn header(s: &Ui, t: &tok::Theme, accent: Color) -> El {
                 .radius(7.0)
                 .center_y()
                 .fill(accent.alpha(0.16))
-                .child(text("Files").font(type_::TITLE).color(accent)),
+                .child(text(chip).font(type_::TITLE).color(accent)),
         )
     } else {
         bar.child(
@@ -127,7 +131,7 @@ fn header(s: &Ui, t: &tok::Theme, accent: Color) -> El {
         )
     };
     bar = bar.child(field);
-    if files && matches!(s.session.results(), Results::Searching { .. }) {
+    if mode != Mode::Apps && matches!(s.session.results(), Results::Searching { .. }) {
         bar = bar.child(text("Searching…").font(type_::LABEL).color(t.text_secondary));
     }
     bar
@@ -140,6 +144,7 @@ fn hint(s: &Ui) -> Option<&'static str> {
         s.session.results(),
     ) {
         (Mode::Files, true, _) => Some("Type to search files with Spotlight  ·  ⌫ back to apps"),
+        (Mode::Contents, true, _) => Some("Type to search inside files with Spotlight  ·  ⌫ back to apps"),
         (_, false, Results::Done) => Some("No matches"),
         _ => None,
     }

@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use dupin_core::{Config, Delivery, Effect, Intent, Mode, Searcher, Session};
-use dupin_mac::{AppsProvider, SpotlightProvider};
+use dupin_mac::{AppsProvider, SpotlightProvider, Target};
 use rune::{
     Align, AppHandle, DisplayTarget, Image, ImageCache, Key, KeyEvent, OverlayPlacement, ScreenEdge,
     TextEdit, Tx, Waker,
@@ -30,6 +30,7 @@ pub struct Ui {
     icon_cache: Option<ImageCache>,
     apps: Searcher,
     files: Searcher,
+    contents: Searcher,
     file_limit: usize,
     me: AppHandle<Ui>,
 }
@@ -50,7 +51,16 @@ impl Ui {
             icons: HashMap::new(),
             icon_cache: None,
             apps: Searcher::spawn("apps", apps_provider, deliver(me.clone())),
-            files: Searcher::spawn("spotlight", Arc::new(SpotlightProvider), deliver(me.clone())),
+            files: Searcher::spawn(
+                "files",
+                Arc::new(SpotlightProvider::new(Target::Names)),
+                deliver(me.clone()),
+            ),
+            contents: Searcher::spawn(
+                "contents",
+                Arc::new(SpotlightProvider::new(Target::Contents)),
+                deliver(me.clone()),
+            ),
             file_limit: config.file_limit,
             me,
         }
@@ -157,17 +167,21 @@ impl Ui {
                     generation,
                     query,
                 } => {
-                    let (to, other, limit) = match mode {
-                        Mode::Apps => (&self.apps, &self.files, APP_LIMIT),
-                        Mode::Files => (&self.files, &self.apps, self.file_limit),
+                    let limit = if mode == Mode::Apps {
+                        APP_LIMIT
+                    } else {
+                        self.file_limit
                     };
-                    other.cancel();
-                    to.search(generation, query, limit);
+                    for (m, searcher) in self.searchers() {
+                        if m == mode {
+                            searcher.search(generation, query.clone(), limit);
+                        } else {
+                            searcher.cancel();
+                        }
+                    }
                 }
-                Effect::CancelSearch => {
-                    self.apps.cancel();
-                    self.files.cancel();
-                }
+                Effect::CancelSearch => self.searchers().iter().for_each(|(_, s)| s.cancel()),
+                Effect::ClearQuery => self.query.clear(),
                 Effect::Run(action) => {
                     // Launch Services can take a moment to answer; don't hold the frame for it.
                     std::thread::spawn(move || {
@@ -184,6 +198,14 @@ impl Ui {
                 }
             }
         }
+    }
+
+    fn searchers(&self) -> [(Mode, &Searcher); 3] {
+        [
+            (Mode::Apps, &self.apps),
+            (Mode::Files, &self.files),
+            (Mode::Contents, &self.contents),
+        ]
     }
 
     /// Ask for the icons of the rows on screen. Handles live in `icons`, which the cache
