@@ -14,7 +14,7 @@ import { render } from 'svelte/server';
 import type { Component } from 'svelte';
 import { pages, type PageName, type PageProps } from '../pages/index.ts';
 import { downloadMarkdown, homeMarkdown } from '../markdown.ts';
-import { siteDescription, siteName, siteUrl } from '../site.ts';
+import { siteDescription, siteName, siteUrl, tagline } from '../site.ts';
 
 const readerChrome = { copy: true, externalLinks: false, backToTop: false } as const;
 
@@ -92,7 +92,7 @@ const host = {
 						context,
 						{
 							name: 'home',
-							title: `${siteName}: a launcher for Apple silicon Macs`,
+							title: `${siteName}: ${tagline}`,
 							description: siteDescription,
 							pathname: '/',
 							markdown: homeMarkdown,
@@ -112,7 +112,7 @@ const host = {
 						context,
 						{
 							name: 'download',
-							title: `Download ${siteName}`,
+							title: `Download ${siteName}, ${tagline}`,
 							description:
 								'Download Dupin for Apple silicon Macs: the app, Homebrew casks, or a Nix build.',
 							pathname: '/download',

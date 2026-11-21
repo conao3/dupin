@@ -4,8 +4,8 @@ export const releasesUrl = `${repo}/releases`;
 export const sponsorUrl = 'https://github.com/sponsors/ryoppippi';
 export const siteUrl = 'https://dupin.app';
 export const siteName = 'Dupin';
-export const siteDescription =
-	'A lightweight, resident launcher for Apple silicon Macs. Press ⌘Space and the panel is already there.';
+export const tagline = 'a fast, open-source launcher for Apple silicon Macs';
+export const siteDescription = `Dupin is ${tagline}. It stays resident, so when you press ⌘Space the panel is already there.`;
 
 export const channels = {
 	stable: {
@@ -20,6 +20,10 @@ export const channels = {
 		release: `${repo}/releases/tag/nightly`,
 	},
 } as const;
+
+// Until the first stable release ships, every download link points at the nightly build.
+export const stableReleased = false;
+export const downloadChannel: keyof typeof channels = stableReleased ? 'stable' : 'nightly';
 
 export const nixInstall = 'nix profile install github:x-ryoppippi/dupin';
 

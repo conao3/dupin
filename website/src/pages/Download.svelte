@@ -3,10 +3,11 @@
 	import CopyButton from '../components/CopyButton.svelte';
 	import Footer from '../components/Footer.svelte';
 	import Nav from '../components/Nav.svelte';
-	import { channels, nixInstall, releasesUrl, repo } from '../site.ts';
+	import { channels, downloadChannel, nixInstall, releasesUrl, repo, stableReleased } from '../site.ts';
 
 	const stableVersion = version.trim();
-	let channel = $state<keyof typeof channels>('stable');
+	let channel = $state<keyof typeof channels>(downloadChannel);
+	const unreleased = $derived(channel === 'stable' && !stableReleased);
 	const current = $derived(channels[channel]);
 	const brew = $derived(`brew install --cask ${current.cask}`);
 </script>
@@ -30,7 +31,9 @@
 			{/each}
 		</div>
 		<p class="download-version">
-			{#if channel === 'stable'}
+			{#if unreleased}
+				Not released yet
+			{:else if channel === 'stable'}
 				<a href={`${repo}/releases/tag/v${stableVersion}`}>v{stableVersion} <span class="arrow">↗</span></a>
 			{:else}
 				<a href={channels.nightly.release}>Built daily from main <span class="arrow">↗</span></a>
@@ -38,27 +41,34 @@
 		</p>
 	</header>
 
-	<section class="download-section">
-		<h2><span class="section-icon icon-[simple-icons--apple]" aria-hidden="true"></span>macOS</h2>
-		<div class="download-cards">
-			<a class="download-card" href={current.dmg}>
-				<img src="/favicon.svg" alt="" width="32" height="32" />
-				<span>
-					<strong>Apple silicon</strong>
-					<small>.dmg · macOS 14 or later</small>
-				</span>
-			</a>
-		</div>
-		<p class="download-note">Signed and notarized. It updates itself.</p>
-	</section>
+	{#if unreleased}
+		<section class="download-section download-unreleased">
+			<p>The first stable release isn't out yet. Until it is, the nightly build is the one to install.</p>
+			<button type="button" class="btn-secondary" onclick={() => (channel = 'nightly')}>Show the nightly build</button>
+		</section>
+	{:else}
+		<section class="download-section">
+			<h2><span class="section-icon icon-[simple-icons--apple]" aria-hidden="true"></span>macOS</h2>
+			<div class="download-cards">
+				<a class="download-card" href={current.dmg}>
+					<img src="/favicon.svg" alt="" width="32" height="32" />
+					<span>
+						<strong>Apple silicon</strong>
+						<small>.dmg · macOS 14 or later</small>
+					</span>
+				</a>
+			</div>
+			<p class="download-note">Signed and notarized. It updates itself.</p>
+		</section>
 
-	<section class="download-section">
-		<h2><span class="section-icon icon-[simple-icons--homebrew]" aria-hidden="true"></span>Homebrew</h2>
-		<div class="command">
-			<code>{brew}</code>
-			<CopyButton text={brew} label="Copy the Homebrew command" copiedMessage="Copied the Homebrew command." />
-		</div>
-	</section>
+		<section class="download-section">
+			<h2><span class="section-icon icon-[simple-icons--homebrew]" aria-hidden="true"></span>Homebrew</h2>
+			<div class="command">
+				<code>{brew}</code>
+				<CopyButton text={brew} label="Copy the Homebrew command" copiedMessage="Copied the Homebrew command." />
+			</div>
+		</section>
+	{/if}
 
 	<section class="download-section">
 		<h2><span class="section-icon icon-[simple-icons--nixos]" aria-hidden="true"></span>Nix</h2>
