@@ -1,0 +1,207 @@
+//! The panel's state: a `Session` from dupin-core plus what only the UI needs (the text
+//! field, icons, a notice). Handlers translate keys into session intents and carry out the
+//! effects the session returns.
+
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use dupin_core::{Config, Delivery, Effect, Intent, Mode, Searcher, Session};
+use dupin_mac::{AppsProvider, SpotlightProvider};
+use rune::{
+    Align, AppHandle, DisplayTarget, Image, ImageCache, Key, KeyEvent, OverlayPlacement, ScreenEdge,
+    TextEdit, Tx, Waker,
+};
+
+/// The most apps a search returns; the list shows a few rows and scrolls.
+const APP_LIMIT: usize = 50;
+/// Icons kept decoded: enough for a full file result list and the apps around it.
+const ICON_CAP: usize = 512;
+/// The panel's top edge, below the display's top: about where Spotlight puts its field.
+const TOP_MARGIN: f32 = 180.0;
+pub const ICON_SIZE: f32 = 32.0;
+
+pub struct Ui {
+    pub session: Session,
+    pub query: TextEdit,
+    /// A problem to show above the results until the panel next hides (a hotkey that
+    /// couldn't be registered, a broken config file).
+    pub notice: Option<String>,
+    pub icons: HashMap<String, Image>,
+    icon_cache: Option<ImageCache>,
+    apps: Searcher,
+    files: Searcher,
+    file_limit: usize,
+    me: AppHandle<Ui>,
+}
+
+impl Ui {
+    pub fn new(me: AppHandle<Ui>, config: Config, notice: Option<String>) -> Ui {
+        let apps_provider = Arc::new(AppsProvider::standard());
+        // Scan before the first keystroke so it doesn't wait for the disk.
+        let warm = apps_provider.clone();
+        std::thread::spawn(move || warm.warm());
+        let deliver = |me: AppHandle<Ui>| move |d: Delivery| me.update(move |s, _| s.deliver(d));
+        let mut query = TextEdit::new("");
+        query.focused = true;
+        Ui {
+            session: Session::default(),
+            query,
+            notice,
+            icons: HashMap::new(),
+            icon_cache: None,
+            apps: Searcher::spawn("apps", apps_provider, deliver(me.clone())),
+            files: Searcher::spawn("spotlight", Arc::new(SpotlightProvider), deliver(me.clone())),
+            file_limit: config.file_limit,
+            me,
+        }
+    }
+
+    pub fn setup(s: &mut Ui, waker: Waker) {
+        s.icon_cache = Some(ImageCache::new(waker));
+    }
+
+    /// The hotkey: show the panel, or hide it when it already shows.
+    pub fn toggle(&mut self, tx: &mut Tx) {
+        if self.me.is_visible() {
+            self.dismiss(tx);
+        } else {
+            self.show();
+        }
+    }
+
+    fn show(&mut self) {
+        self.query.focused = true;
+        self.me.place(
+            DisplayTarget::UnderPointer,
+            OverlayPlacement::Edge {
+                edge: ScreenEdge::Top,
+                margin: TOP_MARGIN,
+                align: Align::Center,
+                inset: 0.0,
+            },
+        );
+        self.me.show();
+    }
+
+    /// Hide and reset, as Esc and losing focus do.
+    pub fn dismiss(&mut self, tx: &mut Tx) {
+        let effects = self.session.reset();
+        self.apply(effects, tx);
+        self.hide(tx);
+    }
+
+    fn hide(&mut self, tx: &mut Tx) {
+        self.query.clear();
+        self.notice = None;
+        tx.close_window();
+    }
+
+    pub fn show_notice(&mut self, message: String, tx: &mut Tx) {
+        self.notice = Some(message);
+        tx.instant();
+        self.show();
+    }
+
+    /// The field's text changed.
+    pub fn edited(&mut self, tx: &mut Tx) {
+        let effects = self.session.set_query(&self.query.text);
+        self.apply(effects, tx);
+    }
+
+    /// Keys the field sees first. True consumes the key.
+    pub fn key(&mut self, ev: &KeyEvent, tx: &mut Tx) -> bool {
+        let m = ev.mods;
+        let plain = !(m.cmd || m.ctrl || m.alt);
+        let intent = match &ev.key {
+            Key::Text(t) if t == " " && plain && !m.shift => Intent::Space,
+            Key::Backspace if plain => Intent::Backspace,
+            Key::Up => Intent::Up,
+            Key::Down => Intent::Down,
+            Key::Enter if m.cmd => Intent::OpenAlternate,
+            Key::Enter => Intent::Open,
+            Key::Escape => Intent::Dismiss,
+            // An accessory app has no menu bar, so ⌘Q in the panel is the way to quit.
+            Key::Command('q') => {
+                tx.quit();
+                return true;
+            }
+            _ => return false,
+        };
+        let Some(effects) = self.session.intent(intent) else {
+            return false;
+        };
+        self.apply(effects, tx);
+        true
+    }
+
+    /// A click on a result row.
+    pub fn open(&mut self, id: &str, tx: &mut Tx) {
+        if self.session.select_id(id)
+            && let Some(effects) = self.session.intent(Intent::Open)
+        {
+            self.apply(effects, tx);
+        }
+    }
+
+    fn deliver(&mut self, delivery: Delivery) {
+        if self.session.deliver(delivery) {
+            self.fetch_icons();
+        }
+    }
+
+    fn apply(&mut self, effects: Vec<Effect>, tx: &mut Tx) {
+        for effect in effects {
+            match effect {
+                Effect::Search {
+                    mode,
+                    generation,
+                    query,
+                } => {
+                    let (to, other, limit) = match mode {
+                        Mode::Apps => (&self.apps, &self.files, APP_LIMIT),
+                        Mode::Files => (&self.files, &self.apps, self.file_limit),
+                    };
+                    other.cancel();
+                    to.search(generation, query, limit);
+                }
+                Effect::CancelSearch => {
+                    self.apps.cancel();
+                    self.files.cancel();
+                }
+                Effect::Run(action) => {
+                    // Launch Services can take a moment to answer; don't hold the frame for it.
+                    std::thread::spawn(move || {
+                        if !dupin_mac::workspace::run(&action) {
+                            crate::log::warn(&format!("the system couldn't carry out {action:?}"));
+                        }
+                    });
+                }
+                Effect::Hide => self.hide(tx),
+                Effect::RevealSelection => {
+                    if let Some(item) = self.session.selected_item() {
+                        tx.scroll_into_view(crate::view::row_key(&item.id));
+                    }
+                }
+            }
+        }
+    }
+
+    /// Ask for the icons of the rows on screen. Handles live in `icons`, which the cache
+    /// needs to keep them, and which is trimmed to the current rows when it grows too big.
+    fn fetch_icons(&mut self) {
+        let Some(cache) = &self.icon_cache else { return };
+        if self.icons.len() > ICON_CAP {
+            let current: std::collections::HashSet<&str> =
+                self.session.items().iter().map(|i| i.id.as_str()).collect();
+            self.icons.retain(|id, _| current.contains(id.as_str()));
+        }
+        for item in self.session.items() {
+            if let Some(path) = &item.icon
+                && !self.icons.contains_key(&item.id)
+            {
+                self.icons
+                    .insert(item.id.clone(), cache.app_icon(path, ICON_SIZE));
+            }
+        }
+    }
+}
