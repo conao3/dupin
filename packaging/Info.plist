@@ -7,7 +7,7 @@
 	<key>CFBundleDisplayName</key>
 	<string>Dupin</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.github.x-ryoppippi.dupin</string>
+	<string>app.dupin.Dupin</string>
 	<key>CFBundleExecutable</key>
 	<string>dupin</string>
 	<key>CFBundlePackageType</key>
