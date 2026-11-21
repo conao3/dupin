@@ -9,7 +9,7 @@ pub mod provider;
 pub mod searcher;
 pub mod session;
 
-pub use config::Config;
+pub use config::{Config, Position};
 pub use item::{Action, Item, ItemKind};
 pub use provider::{Provider, Request};
 pub use searcher::{Delivery, Searcher};

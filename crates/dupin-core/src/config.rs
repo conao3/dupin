@@ -10,6 +10,19 @@ pub struct Config {
     pub hotkey: String,
     /// The most files a Spotlight search shows.
     pub file_limit: usize,
+    /// Where the panel opens on the display under the pointer.
+    pub position: Position,
+}
+
+/// Where the panel opens. Results always grow downwards from the field.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Position {
+    /// The field at the display's vertical center.
+    #[default]
+    Center,
+    /// The field near the top, about where Spotlight puts it.
+    Top,
 }
 
 impl Default for Config {
@@ -17,6 +30,7 @@ impl Default for Config {
         Config {
             hotkey: "cmd+space".into(),
             file_limit: 200,
+            position: Position::Center,
         }
     }
 }
@@ -48,5 +62,15 @@ mod tests {
     #[test]
     fn rejects_unknown_keys() {
         assert!(Config::parse("hotkye = \"alt+space\"").is_err());
+    }
+
+    #[test]
+    fn reads_the_position() {
+        assert_eq!(Config::default().position, Position::Center);
+        assert_eq!(
+            Config::parse("position = \"top\"").unwrap().position,
+            Position::Top
+        );
+        assert!(Config::parse("position = \"middle\"").is_err());
     }
 }

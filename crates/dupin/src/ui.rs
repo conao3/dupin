@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use dupin_core::{Config, Delivery, Effect, Intent, Mode, Searcher, Session};
+use dupin_core::{Config, Delivery, Effect, Intent, Mode, Position, Searcher, Session};
 use dupin_mac::{AppsProvider, SpotlightProvider, Target};
 use rune::{
     Align, AppHandle, DisplayTarget, Image, ImageCache, Key, KeyEvent, OverlayPlacement, ScreenEdge,
@@ -16,7 +16,8 @@ use rune::{
 const APP_LIMIT: usize = 50;
 /// Icons kept decoded: enough for a full file result list and the apps around it.
 const ICON_CAP: usize = 512;
-/// The panel's top edge, below the display's top: about where Spotlight puts its field.
+/// The panel's top edge below the display's for `position = "top"`: about where Spotlight
+/// puts its field.
 const TOP_MARGIN: f32 = 180.0;
 pub const ICON_SIZE: f32 = 32.0;
 
@@ -32,6 +33,7 @@ pub struct Ui {
     files: Searcher,
     contents: Searcher,
     file_limit: usize,
+    position: Position,
     me: AppHandle<Ui>,
 }
 
@@ -62,6 +64,7 @@ impl Ui {
                 deliver(me.clone()),
             ),
             file_limit: config.file_limit,
+            position: config.position,
             me,
         }
     }
@@ -79,6 +82,17 @@ impl Ui {
         }
     }
 
+    /// The panel's top edge below the display's, for the configured position. Centering puts
+    /// the field (not the whole panel, which grows with results) at the display's middle.
+    fn top_margin(&self) -> f32 {
+        match self.position {
+            Position::Top => TOP_MARGIN,
+            Position::Center => dupin_mac::window::pointer_display_height().map_or(TOP_MARGIN, |h| {
+                ((h as f32 - crate::view::HEADER_H) / 2.0).max(0.0)
+            }),
+        }
+    }
+
     fn show(&mut self) {
         crate::trace::summoned();
         self.query.focused = true;
@@ -86,7 +100,7 @@ impl Ui {
             DisplayTarget::UnderPointer,
             OverlayPlacement::Edge {
                 edge: ScreenEdge::Top,
-                margin: TOP_MARGIN,
+                margin: self.top_margin(),
                 align: Align::Center,
                 inset: 0.0,
             },
