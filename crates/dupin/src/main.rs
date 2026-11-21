@@ -47,24 +47,25 @@ fn main() {
     // The settings window: an ordinary titled window, made when ⌘, first opens it.
     let prefs = App::new(AppSpec::new(
         "Dupin Settings",
-        prefs::SIZE,
+        prefs::size(update::has_feed()),
         || unreachable!(),
         prefs::view,
     ))
     .windowless();
     let prefs_handle = prefs.handle();
+    let updater = update::Updater::start(config.auto_update, handle.clone(), prefs_handle.clone());
     let prefs = prefs.init({
-        let (config, binding, panel) = (config.clone(), binding.clone(), handle.clone());
-        move || prefs::Prefs::new(config, binding, panel)
+        let (config, binding, panel, updater) =
+            (config.clone(), binding.clone(), handle.clone(), updater.clone());
+        move || prefs::Prefs::new(config, binding, panel, updater)
     });
 
-    update::spawn(config.auto_update, handle.clone());
     let hotkey = config.hotkey.clone();
     let mut registered = false;
     let app = app
         .init({
             let handle = handle.clone();
-            move || ui::Ui::new(handle, prefs_handle, config, history, config_problem)
+            move || ui::Ui::new(handle, prefs_handle, updater, config, history, config_problem)
         })
         .on_ready(move |window| {
             appear_instantly(window);

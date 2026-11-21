@@ -2,19 +2,27 @@
 //!
 //! The release packaging writes the channel's feed URL into Info.plist (`DupinUpdateFeed`);
 //! a build without one (Nix, `cargo run`) never updates, since Nix owns its store paths. The
-//! feed is a small JSON file beside the release's zip. An update is installed only when the
-//! downloaded bundle satisfies the running bundle's own designated requirement (same bundle
-//! identifier, same Developer ID team) and Gatekeeper accepts it, then swapped in with two
-//! renames and launched once the panel is hidden.
+//! feed is a small JSON file beside the release's zip. A newer build is unpacked beside the
+//! installed bundle, in `.Dupin-update-<build>`, and kept only when it satisfies the running
+//! bundle's own designated requirement (same bundle identifier, same Developer ID team) and
+//! Gatekeeper accepts it. The installed bundle stays untouched until Dupin restarts into the
+//! update or quits: then one `renamex_np(RENAME_SWAP)` exchanges the two, so the install path
+//! is never empty, and the replaced bundle waits in the staging folder for the next launch to
+//! remove it. A copy that can't replace itself (a read-only folder, App Translocation) only
+//! says where to download the update. `DUPIN_DISABLE_UPDATES=1` turns the updater off.
 
+use std::ffi::CString;
+use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::time::{Duration, Instant};
 
 use rune::AppHandle;
 use serde::Deserialize;
 
+use crate::prefs::Prefs;
 use crate::ui::Ui;
 
 /// Long enough after launch not to compete with the first app scan and the panel's warm-up.
@@ -22,13 +30,9 @@ const FIRST_CHECK: Duration = Duration::from_secs(60);
 const INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
 /// The name the release zip gives the bundle, whatever the user renamed the installed copy to.
 const ARCHIVED_BUNDLE: &str = "Dupin.app";
-
-static ENABLED: AtomicBool = AtomicBool::new(true);
-
-/// Follow `auto_update` in config.toml; the next check reads it.
-pub fn set_enabled(enabled: bool) {
-    ENABLED.store(enabled, Ordering::Relaxed);
-}
+/// What a staging folder beside the installed bundle is named with. Only folders with this
+/// prefix are ever removed.
+const PREFIX: &str = ".Dupin-update-";
 
 /// What a channel's `update.json` says about its newest build.
 #[derive(Debug, Deserialize, PartialEq, Eq)]
@@ -46,6 +50,38 @@ impl Feed {
     }
 }
 
+/// How this copy takes an update.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Method {
+    /// Stage it beside the bundle and swap it in.
+    Install,
+    /// Point at the download: the bundle can't be replaced in place.
+    DownloadOnly,
+}
+
+impl Method {
+    /// Replacing the bundle renames it within its folder, so both must be writable, and a
+    /// Gatekeeper App Translocation copy is a read-only mount that disappears with the process.
+    fn of(bundle: &Path, writable: impl Fn(&Path) -> bool) -> Method {
+        let translocated = bundle.components().any(|c| c.as_os_str() == "AppTranslocation");
+        if !translocated && writable(bundle) && bundle.parent().is_some_and(&writable) {
+            Method::Install
+        } else {
+            Method::DownloadOnly
+        }
+    }
+}
+
+fn writable(path: &Path) -> bool {
+    CString::new(path.as_os_str().as_bytes())
+        // SAFETY: The string is NUL-terminated and outlives the call; access has no side effects.
+        .is_ok_and(|path| unsafe { libc::access(path.as_ptr(), libc::W_OK) } == 0)
+}
+
+fn off_by_env() -> bool {
+    std::env::var_os("DUPIN_DISABLE_UPDATES").is_some_and(|v| v == "1")
+}
+
 /// The running build, when it can update itself.
 struct Installed {
     bundle: PathBuf,
@@ -53,6 +89,7 @@ struct Installed {
     build: u64,
     /// The bundle's designated requirement, which an update must satisfy.
     requirement: String,
+    method: Method,
 }
 
 impl Installed {
@@ -70,6 +107,7 @@ impl Installed {
             return Err(format!("{} is not signed with a Developer ID", bundle.display()));
         }
         Ok(Some(Installed {
+            method: Method::of(&bundle, writable),
             bundle,
             feed,
             build,
@@ -78,73 +116,351 @@ impl Installed {
     }
 }
 
-/// Start checking the channel's feed, when this build has one.
-pub fn spawn(enabled: bool, panel: AppHandle<Ui>) {
-    set_enabled(enabled);
-    let installed = match Installed::current() {
-        Ok(Some(installed)) => installed,
-        Ok(None) => return,
-        Err(e) => return crate::log::warn(&format!("updates are off: {e}")),
-    };
-    std::thread::Builder::new()
-        .name("dupin-update".into())
-        .spawn(move || {
-            std::thread::sleep(FIRST_CHECK);
-            loop {
-                if ENABLED.load(Ordering::Relaxed) {
-                    match check(&installed) {
-                        Ok(Some(version)) => {
-                            crate::log::warn(&format!("installed Dupin {version}"));
-                            let bundle = installed.bundle.clone();
-                            panel.update(move |s, _| s.updated(bundle));
-                            return;
-                        }
-                        Ok(None) => {}
-                        Err(e) => crate::log::warn(&format!("couldn't update: {e}")),
-                    }
-                }
-                std::thread::sleep(INTERVAL);
-            }
-        })
-        .expect("spawn updater");
+/// What a check found newer than the running build.
+enum Found {
+    Staged(Staged),
+    Download { version: String, url: String },
 }
 
-/// Install the feed's build if it is newer, returning its version.
-fn check(installed: &Installed) -> Result<Option<String>, String> {
+/// A verified update unpacked beside the bundle it replaces.
+#[derive(Debug)]
+struct Staged {
+    update: PathBuf,
+    installed: PathBuf,
+    version: String,
+}
+
+/// Where the updater is, as Settings shows it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Status {
+    /// `DUPIN_DISABLE_UPDATES`, or a build that isn't signed with a Developer ID.
+    Off,
+    /// No check has run yet.
+    Idle,
+    Checking,
+    Downloading,
+    Current,
+    Failed(String),
+    /// Staged; installs on restart or quit.
+    Ready(String),
+    /// A newer build this copy can't install itself.
+    Download {
+        url: String,
+    },
+}
+
+impl Status {
+    pub fn text(&self, auto_update: bool, download_only: bool) -> String {
+        match self {
+            Status::Off => "Off".into(),
+            Status::Checking => "Checking…".into(),
+            Status::Downloading => "Downloading…".into(),
+            Status::Failed(e) => format!("Couldn't update: {}", e.lines().next().unwrap_or_default()),
+            Status::Ready(version) => format!("Ready: {version}"),
+            Status::Download { .. } => "Download only".into(),
+            Status::Idle | Status::Current if download_only => "Download only".into(),
+            Status::Idle if !auto_update => "Off".into(),
+            Status::Idle => "Not checked yet".into(),
+            Status::Current => "Up to date".into(),
+        }
+    }
+
+    /// Whether "Check for Updates" can start a check now.
+    pub fn can_check(&self) -> bool {
+        matches!(
+            self,
+            Status::Idle | Status::Current | Status::Failed(_) | Status::Download { .. }
+        )
+    }
+}
+
+/// The updater's state, shared by its worker, the panel and Settings.
+#[derive(Clone)]
+pub struct Updater {
+    shared: Arc<Shared>,
+}
+
+struct Shared {
+    /// `auto_update` in config.toml; the next scheduled check reads it.
+    enabled: AtomicBool,
+    /// This build has an update feed, so Settings shows its updates.
+    available: bool,
+    download_only: bool,
+    version: String,
+    inner: Mutex<Inner>,
+    /// Set by "Check for Updates"; the worker waits on it between checks.
+    wake: Mutex<bool>,
+    signal: Condvar,
+    prefs: AppHandle<Prefs>,
+}
+
+struct Inner {
+    status: Status,
+    staged: Option<Staged>,
+    /// The bundles were swapped. A second swap would exchange them back, so nothing stages or
+    /// swaps again in this process.
+    applied: bool,
+}
+
+impl Updater {
+    /// Start checking the channel's feed, when this build has one.
+    pub fn start(enabled: bool, panel: AppHandle<Ui>, prefs: AppHandle<Prefs>) -> Updater {
+        let installed = if off_by_env() {
+            Ok(None)
+        } else {
+            Installed::current().inspect_err(|e| crate::log::warn(&format!("updates are off: {e}")))
+        };
+        let installed = installed.ok().flatten();
+        let download_only = installed
+            .as_ref()
+            .is_some_and(|i| i.method == Method::DownloadOnly);
+        let updater = Updater {
+            shared: Arc::new(Shared {
+                enabled: AtomicBool::new(enabled),
+                available: has_feed(),
+                download_only,
+                version: dupin_mac::bundle::info_string("CFBundleShortVersionString").unwrap_or_default(),
+                inner: Mutex::new(Inner {
+                    status: if installed.is_some() {
+                        Status::Idle
+                    } else {
+                        Status::Off
+                    },
+                    staged: None,
+                    applied: false,
+                }),
+                wake: Mutex::new(false),
+                signal: Condvar::new(),
+                prefs,
+            }),
+        };
+        let Some(installed) = installed else {
+            return updater;
+        };
+        match installed.method {
+            Method::Install => remove_beside(&installed.bundle),
+            Method::DownloadOnly => crate::log::warn(&format!(
+                "updates are download only: {} can't be replaced in place",
+                installed.bundle.display()
+            )),
+        }
+        let shared = updater.shared.clone();
+        std::thread::Builder::new()
+            .name("dupin-update".into())
+            .spawn(move || run(&shared, &installed, &panel))
+            .expect("spawn updater");
+        updater
+    }
+
+    pub fn available(&self) -> bool {
+        self.shared.available
+    }
+
+    /// `CFBundleShortVersionString` of the running build.
+    pub fn version(&self) -> &str {
+        &self.shared.version
+    }
+
+    pub fn status(&self) -> Status {
+        self.shared.lock().status.clone()
+    }
+
+    pub fn download_only(&self) -> bool {
+        self.shared.download_only
+    }
+
+    /// Turning updates on checks at once rather than at the next interval.
+    pub fn set_enabled(&self, enabled: bool) {
+        let was = self.shared.enabled.swap(enabled, Ordering::Relaxed);
+        if enabled && !was {
+            self.check_now();
+        }
+    }
+
+    pub fn check_now(&self) {
+        if !self.status().can_check() {
+            return;
+        }
+        *self.shared.wake.lock().unwrap_or_else(|e| e.into_inner()) = true;
+        self.shared.signal.notify_all();
+    }
+
+    /// Open the download a copy that can't install the update itself needs.
+    pub fn open_download(&self) {
+        let Status::Download { url } = self.status() else {
+            return;
+        };
+        // The feed is unsigned: open a web page, never a file or another app's URL scheme.
+        if !url.starts_with("https://") {
+            return crate::log::warn(&format!("not opening the update download {url}"));
+        }
+        if let Err(e) = Command::new("/usr/bin/open").arg(&url).spawn() {
+            crate::log::warn(&format!("couldn't open {url}: {e}"));
+        }
+    }
+
+    /// Swap in the staged update and start it once this process has exited, and exit.
+    /// Returns when nothing is staged or the swap failed.
+    pub fn restart(&self) {
+        let Some(staged) = self.take_staged() else { return };
+        match swap(&staged.update, &staged.installed) {
+            Ok(()) => relaunch(&staged.installed),
+            Err(e) => {
+                let e = format!("couldn't install Dupin {}: {e}", staged.version);
+                crate::log::warn(&e);
+                self.shared.lock().applied = false;
+                self.shared.set_status(Status::Failed(e));
+            }
+        }
+    }
+
+    /// Quitting with an update staged installs it for the next launch.
+    pub fn install_on_quit(&self) {
+        let Some(staged) = self.take_staged() else { return };
+        if let Err(e) = swap(&staged.update, &staged.installed) {
+            crate::log::warn(&format!("couldn't install Dupin {} at quit: {e}", staged.version));
+        }
+    }
+
+    /// The staged update, which no later call sees: whoever takes it swaps.
+    fn take_staged(&self) -> Option<Staged> {
+        let mut inner = self.shared.lock();
+        let staged = inner.staged.take()?;
+        inner.applied = true;
+        Some(staged)
+    }
+}
+
+/// Whether this build has a channel to update from at all.
+pub fn has_feed() -> bool {
+    dupin_mac::bundle::info_string("DupinUpdateFeed").is_some()
+}
+
+impl Shared {
+    fn lock(&self) -> MutexGuard<'_, Inner> {
+        self.inner.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn set_status(&self, status: Status) {
+        self.lock().status = status;
+        self.prefs.update(|_, _| {});
+    }
+
+    /// Wait `delay` or until "Check for Updates"; true when asked.
+    fn wait(&self, delay: Duration) -> bool {
+        let deadline = Instant::now() + delay;
+        let mut asked = self.wake.lock().unwrap_or_else(|e| e.into_inner());
+        while !*asked {
+            let now = Instant::now();
+            if now >= deadline {
+                break;
+            }
+            asked = self
+                .signal
+                .wait_timeout(asked, deadline - now)
+                .unwrap_or_else(|e| e.into_inner())
+                .0;
+        }
+        std::mem::take(&mut *asked)
+    }
+}
+
+fn run(shared: &Shared, installed: &Installed, panel: &AppHandle<Ui>) {
+    let mut asked = shared.wait(FIRST_CHECK);
+    let mut announced = None;
+    loop {
+        let idle = {
+            let inner = shared.lock();
+            if inner.applied {
+                return;
+            }
+            inner.staged.is_none()
+        };
+        if idle && (asked || shared.enabled.load(Ordering::Relaxed)) {
+            shared.set_status(Status::Checking);
+            match check(shared, installed) {
+                Ok(Some(Found::Staged(staged))) => adopt(shared, staged, panel),
+                Ok(Some(Found::Download { version, url })) => {
+                    if announced.as_ref() != Some(&version) {
+                        crate::log::warn(&format!("Dupin {version} is available: {url}"));
+                        announced = Some(version);
+                    }
+                    shared.set_status(Status::Download { url });
+                }
+                Ok(None) => shared.set_status(Status::Current),
+                Err(e) => {
+                    crate::log::warn(&format!("couldn't update: {e}"));
+                    shared.set_status(Status::Failed(e));
+                }
+            }
+        }
+        asked = shared.wait(INTERVAL);
+    }
+}
+
+/// Keep `staged` for the restart, unless a swap already happened: the folder it is in then
+/// may hold nothing else this process needs.
+fn adopt(shared: &Shared, staged: Staged, panel: &AppHandle<Ui>) {
+    let mut inner = shared.lock();
+    if inner.applied {
+        drop(inner);
+        if let Some(folder) = staged.update.parent() {
+            let _ = std::fs::remove_dir_all(folder);
+        }
+        return;
+    }
+    crate::log::warn(&format!("Dupin {} is ready to install", staged.version));
+    inner.status = Status::Ready(staged.version.clone());
+    inner.staged = Some(staged);
+    drop(inner);
+    shared.prefs.update(|_, _| {});
+    panel.update(|s, _| s.updated());
+}
+
+/// Stage the feed's build if it is newer, or say where to get it when this copy can't
+/// install it.
+fn check(shared: &Shared, installed: &Installed) -> Result<Option<Found>, String> {
     let feed = Feed::parse(&output(curl(Duration::from_secs(60)).arg(&installed.feed))?)?;
     if feed.build <= installed.build {
         return Ok(None);
     }
-    install(installed, &feed)?;
-    Ok(Some(feed.version))
+    Ok(Some(match installed.method {
+        Method::Install => {
+            shared.set_status(Status::Downloading);
+            Found::Staged(stage(installed, &feed)?)
+        }
+        Method::DownloadOnly => Found::Download {
+            version: feed.version,
+            url: feed.url,
+        },
+    }))
 }
 
-fn install(installed: &Installed, feed: &Feed) -> Result<(), String> {
+/// Download, unpack and verify the feed's build in its own folder beside the installed
+/// bundle, on the same volume so the swap is one rename.
+fn stage(installed: &Installed, feed: &Feed) -> Result<Staged, String> {
     let parent = installed
         .bundle
         .parent()
         .ok_or("the app bundle has no parent folder")?;
-    // Beside the bundle, so the swap is a rename on one volume.
-    let staging = parent.join(".dupin-update");
-    // A previous install that could neither place the update nor move the old app back left
-    // the only copy in staging; put it back before staging is cleared.
-    let backup = staging.join("old.app");
-    if !installed.bundle.exists() && backup.exists() {
-        std::fs::rename(&backup, &installed.bundle)
-            .map_err(|e| format!("couldn't restore the old app from {}: {e}", backup.display()))?;
+    let folder = parent.join(format!("{PREFIX}{}", feed.build));
+    let _ = std::fs::remove_dir_all(&folder);
+    std::fs::create_dir(&folder).map_err(|e| format!("couldn't create {}: {e}", folder.display()))?;
+    match unpack_and_verify(installed, feed, &folder) {
+        Ok(update) => Ok(Staged {
+            update,
+            installed: installed.bundle.clone(),
+            version: feed.version.clone(),
+        }),
+        Err(e) => {
+            let _ = std::fs::remove_dir_all(&folder);
+            Err(e)
+        }
     }
-    let _ = std::fs::remove_dir_all(&staging);
-    std::fs::create_dir(&staging).map_err(|e| format!("couldn't create {}: {e}", staging.display()))?;
-    let result = stage_and_swap(installed, feed, &staging);
-    // When neither the update nor the old app is in place, the old app is only in staging.
-    if installed.bundle.exists() {
-        let _ = std::fs::remove_dir_all(&staging);
-    }
-    result
 }
 
-fn stage_and_swap(installed: &Installed, feed: &Feed, staging: &Path) -> Result<(), String> {
-    let zip = staging.join("update.zip");
+fn unpack_and_verify(installed: &Installed, feed: &Feed, folder: &Path) -> Result<PathBuf, String> {
+    let zip = folder.join("update.zip");
     output(
         curl(Duration::from_secs(15 * 60))
             .arg("--output")
@@ -157,14 +473,14 @@ fn stage_and_swap(installed: &Installed, feed: &Feed, staging: &Path) -> Result<
         return Err("the download doesn't match the feed's checksum".into());
     }
 
-    let unpacked = staging.join("unpacked");
     output(
         Command::new("/usr/bin/ditto")
             .args(["-x", "-k"])
             .arg(&zip)
-            .arg(&unpacked),
+            .arg(folder),
     )?;
-    let new = unpacked.join(ARCHIVED_BUNDLE);
+    let _ = std::fs::remove_file(&zip);
+    let new = folder.join(ARCHIVED_BUNDLE);
 
     output(
         Command::new("/usr/bin/codesign")
@@ -194,19 +510,41 @@ fn stage_and_swap(installed: &Installed, feed: &Feed, staging: &Path) -> Result<
     if info_value(&new, "DupinUpdateFeed")? != installed.feed {
         return Err("the update belongs to another channel".into());
     }
+    Ok(new)
+}
 
-    let old = staging.join("old.app");
-    std::fs::rename(&installed.bundle, &old).map_err(|e| format!("couldn't move the old app aside: {e}"))?;
-    if let Err(e) = std::fs::rename(&new, &installed.bundle) {
-        return Err(match std::fs::rename(&old, &installed.bundle) {
-            Ok(()) => format!("couldn't move the update into place: {e}"),
-            Err(back) => format!(
-                "couldn't move the update into place ({e}) or the old app back ({back}); it is at {}",
-                old.display()
-            ),
-        });
+/// Exchange the two bundles in one step: afterwards `installed` holds the update and
+/// `update` the bundle it replaced.
+fn swap(update: &Path, installed: &Path) -> std::io::Result<()> {
+    let from = CString::new(update.as_os_str().as_bytes())?;
+    let to = CString::new(installed.as_os_str().as_bytes())?;
+    // SAFETY: Both strings are NUL-terminated and outlive the call.
+    if unsafe { libc::renamex_np(from.as_ptr(), to.as_ptr(), libc::RENAME_SWAP) } != 0 {
+        return Err(std::io::Error::last_os_error());
     }
     Ok(())
+}
+
+/// Remove the staging folders beside `bundle`: the bundle an update replaced, or an update
+/// never installed. A link with the prefix stays, and so does the bundle itself.
+fn remove_beside(bundle: &Path) {
+    let Some(entries) = bundle.parent().and_then(|p| std::fs::read_dir(p).ok()) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let ours = entry
+            .file_name()
+            .to_str()
+            .is_some_and(|name| name.starts_with(PREFIX));
+        if ours
+            && entry.file_type().is_ok_and(|t| t.is_dir())
+            && path != bundle
+            && let Err(e) = std::fs::remove_dir_all(&path)
+        {
+            crate::log::warn(&format!("couldn't remove {}: {e}", path.display()));
+        }
+    }
 }
 
 /// curl that fails on HTTP errors and gives up on a stalled server.
@@ -229,7 +567,7 @@ fn info_value(bundle: &Path, key: &str) -> Result<String, String> {
 }
 
 /// Start the installed bundle once this process has exited, and exit.
-pub fn relaunch(bundle: &Path) -> ! {
+fn relaunch(bundle: &Path) -> ! {
     let spawned = Command::new("/bin/sh")
         .args([
             "-c",
@@ -297,5 +635,119 @@ mod tests {
     #[test]
     fn rejects_a_feed_without_a_checksum() {
         assert!(Feed::parse(r#"{"version":"0.2.0","build":42,"url":"u"}"#).is_err());
+    }
+
+    #[test]
+    fn installs_only_where_the_bundle_can_be_replaced() {
+        let everywhere = |_: &Path| true;
+        let app = Path::new("/Applications/Dupin.app");
+        assert_eq!(Method::of(app, everywhere), Method::Install);
+        assert_eq!(
+            Method::of(app, |p: &Path| p != Path::new("/Applications")),
+            Method::DownloadOnly
+        );
+        assert_eq!(Method::of(app, |p: &Path| p != app), Method::DownloadOnly);
+        let translocated = Path::new("/private/var/folders/x/AppTranslocation/1234/d/Dupin.app");
+        assert_eq!(Method::of(translocated, everywhere), Method::DownloadOnly);
+    }
+
+    #[test]
+    fn says_where_the_updater_is() {
+        let text = |status: Status| status.text(true, false);
+        assert_eq!(text(Status::Off), "Off");
+        assert_eq!(text(Status::Idle), "Not checked yet");
+        assert_eq!(text(Status::Checking), "Checking…");
+        assert_eq!(text(Status::Downloading), "Downloading…");
+        assert_eq!(text(Status::Current), "Up to date");
+        assert_eq!(text(Status::Ready("0.3.0".into())), "Ready: 0.3.0");
+        assert_eq!(
+            text(Status::Failed("/usr/bin/curl failed: timed out\nmore".into())),
+            "Couldn't update: /usr/bin/curl failed: timed out"
+        );
+        assert_eq!(Status::Idle.text(false, false), "Off");
+        assert_eq!(Status::Current.text(false, false), "Up to date");
+        assert_eq!(Status::Current.text(true, true), "Download only");
+        assert_eq!(
+            text(Status::Download {
+                url: "https://example.com/Dupin.zip".into()
+            }),
+            "Download only"
+        );
+    }
+
+    #[test]
+    fn checks_only_when_nothing_is_under_way() {
+        assert!(Status::Current.can_check());
+        assert!(Status::Failed("x".into()).can_check());
+        assert!(!Status::Off.can_check());
+        assert!(!Status::Checking.can_check());
+        assert!(!Status::Downloading.can_check());
+        assert!(!Status::Ready("0.3.0".into()).can_check());
+    }
+
+    #[test]
+    fn a_temporary_folder_is_writable_and_the_system_is_not() {
+        let root = temporary("writable");
+        assert!(writable(&root));
+        assert!(!writable(Path::new("/System/Applications")));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    fn temporary(name: &str) -> PathBuf {
+        let path = std::env::temp_dir().join(format!("dupin-update-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&path);
+        std::fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    fn bundle(path: &Path, marker: &str) {
+        std::fs::create_dir_all(path.join("Contents")).unwrap();
+        std::fs::write(path.join("Contents/marker"), marker).unwrap();
+    }
+
+    fn marker(path: &Path) -> String {
+        std::fs::read_to_string(path.join("Contents/marker")).unwrap()
+    }
+
+    #[test]
+    fn the_swap_exchanges_the_bundles_and_launch_removes_the_old_one() {
+        let root = temporary("swap");
+        let installed = root.join("Dupin Nightly.app");
+        bundle(&installed, "old");
+        let folder = root.join(format!("{PREFIX}42"));
+        let update = folder.join(ARCHIVED_BUNDLE);
+        bundle(&update, "new");
+
+        swap(&update, &installed).unwrap();
+        assert_eq!(marker(&installed), "new");
+        assert_eq!(marker(&update), "old");
+
+        remove_beside(&installed);
+        assert!(!folder.exists());
+        assert_eq!(marker(&installed), "new");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn launch_cleanup_leaves_what_isnt_a_staging_folder() {
+        let root = temporary("cleanup");
+        let installed = root.join("Dupin.app");
+        bundle(&installed, "running");
+        bundle(&root.join("Other.app"), "other");
+        std::fs::write(root.join(format!("{PREFIX}notes")), "a file").unwrap();
+        let precious = root.join("precious");
+        bundle(&precious, "precious");
+        std::os::unix::fs::symlink(&precious, root.join(format!("{PREFIX}link"))).unwrap();
+        let unused = root.join(format!("{PREFIX}7"));
+        bundle(&unused.join(ARCHIVED_BUNDLE), "unused");
+
+        remove_beside(&installed);
+        assert!(!unused.exists());
+        assert_eq!(marker(&installed), "running");
+        assert!(root.join("Other.app").exists());
+        assert!(root.join(format!("{PREFIX}notes")).exists());
+        assert!(root.join(format!("{PREFIX}link")).exists());
+        assert_eq!(marker(&precious), "precious");
+        let _ = std::fs::remove_dir_all(root);
     }
 }
