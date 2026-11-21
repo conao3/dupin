@@ -41,11 +41,11 @@
 	<section class="download-section">
 		<h2><span class="section-icon icon-[simple-icons--apple]" aria-hidden="true"></span>macOS</h2>
 		<div class="download-cards">
-			<a class="download-card" href={current.zip}>
+			<a class="download-card" href={current.dmg}>
 				<img src="/favicon.svg" alt="" width="32" height="32" />
 				<span>
 					<strong>Apple silicon</strong>
-					<small>.zip · macOS 14 or later</small>
+					<small>.dmg · macOS 14 or later</small>
 				</span>
 			</a>
 		</div>
