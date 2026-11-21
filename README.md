@@ -57,6 +57,8 @@ cargo run -p dupin-mac --example search -- in invoice      # a provider from the
 scripts/snap.sh                        # headless renders of scripts/headless/*.json into target/screenshots
 ```
 
+`DUPIN_TRACE=1` prints, for each summon, how long the panel took from the hotkey handler to its first drawn frame.
+
 Debug builds take Rune's headless flags (`--snap`, `--tree`, `--script`, `--realtime`, ...); see Rune's `crates/rune/README.md`, "Agent tooling".
 
 ## Releases

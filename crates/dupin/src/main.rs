@@ -4,6 +4,7 @@
 mod hotkey;
 mod log;
 mod settings;
+mod trace;
 mod ui;
 mod view;
 
@@ -48,6 +49,7 @@ fn main() {
                 hotkey::register(&handle, &hotkey);
             }
         })
+        .on_frame_encoded(trace::frame)
         .on_focus(|s, focused, tx| {
             if !focused {
                 s.dismiss(tx);

@@ -80,6 +80,7 @@ impl Ui {
     }
 
     fn show(&mut self) {
+        crate::trace::summoned();
         self.query.focused = true;
         self.me.place(
             DisplayTarget::UnderPointer,
