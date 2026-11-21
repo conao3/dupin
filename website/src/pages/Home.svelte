@@ -5,7 +5,6 @@
 	import PanelDemo from '../components/PanelDemo.svelte';
 	import { channels, downloadChannel, repo, setupPrompt, stableReleased } from '../site.ts';
 
-	let { installHtml }: { installHtml: string } = $props();
 </script>
 
 <Nav />
@@ -15,8 +14,8 @@
 		<div class="container hero-inner">
 			<h1 class="display hero-title rise" style="--d: 0ms">Press ⌘Space. It's there.</h1>
 			<p class="hero-sub rise" style="--d: 100ms">
-				A resident launcher for Apple silicon Macs. Dupin draws its panel before you ask for it, so the
-				hotkey only has to show it: apps, files and what's inside them, on Liquid Glass.
+				A fast, simple and beautiful app launcher for your mac.<br />
+				The simplicity of Alfred, with Raycast-style extensions on the way.
 			</p>
 			<div class="cta rise" style="--d: 200ms">
 				<div class="cta-buttons">
@@ -46,18 +45,26 @@
 				</a>
 				<p class="cta-more">
 					{#if !stableReleased}Nightly build until the first release ·{/if}
-					<a href="/download">All downloads</a> · <a href="#install">Install by hand</a>
+					<a href="/download">All downloads</a>
 				</p>
 			</div>
 		</div>
 		<div class="container rise" style="--d: 300ms">
 			<PanelDemo />
-		</div>
-	</section>
-
-	<section class="band install" id="install">
-		<div class="container install-inner">
-			<div class="prose">{@html installHtml}</div>
+			<ul class="traits">
+				<li>
+					<strong>~20 ms</strong>
+					<span>from ⌘Space to the panel on screen. It is drawn before you ask for it.</span>
+				</li>
+				<li>
+					<strong>Written in Rust</strong>
+					<span>Native and fast, drawn on Liquid Glass. No web view, no Electron.</span>
+				</li>
+				<li>
+					<strong>Open source</strong>
+					<span>GPL-3.0. Read it, build it with Nix, change it.</span>
+				</li>
+			</ul>
 		</div>
 	</section>
 </main>
