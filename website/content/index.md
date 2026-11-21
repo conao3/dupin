@@ -20,7 +20,7 @@ brew install --cask x-ryoppippi/tap/dupin
 open -a Dupin
 ```
 
-Install `x-ryoppippi/tap/dupin@nightly` instead to follow `main`, or grab the app from the [download page](/download).
+The build is signed and notarized, and it [updates itself](https://github.com/x-ryoppippi/dupin/blob/main/docs/configuration.md#updates). Install `x-ryoppippi/tap/dupin@nightly` instead to follow `main`, or grab the app from the [download page](/download).
 
 ### Or with Nix
 
