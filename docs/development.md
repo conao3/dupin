@@ -54,3 +54,16 @@ The renders show real results from the machine, file paths included, so they sta
 `DUPIN_TRACE=1` prints, for each summon, when the hotkey handler ran and when the next frame was drawn, with wall-clock times to line up with an outside measurement of when the window reached the screen.
 
 Scripts in this repository are written in Nushell.
+
+## Website
+
+`website/` holds the landing page for <https://dupin.app>: an [ox-content](https://github.com/ubugeeei-prod/ox-content) static site with its own pnpm project. The page layout is JSX in `website/theme/`; the install steps are Markdown in `website/content/index.md`.
+
+```sh
+pnpm -C website install
+pnpm -C website dev    # local server
+pnpm -C website lint   # oxlint, type-aware and type-checked through tsrs
+pnpm -C website deploy # build, then upload dist/ as Cloudflare static assets with cf
+```
+
+`dupin.app/gh` redirects to the repository; the redirects are declared in `website/vite.config.ts`.
