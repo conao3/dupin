@@ -6,4 +6,4 @@ pub mod spotlight;
 pub mod workspace;
 
 pub use apps::AppsProvider;
-pub use spotlight::SpotlightProvider;
+pub use spotlight::{SpotlightProvider, Target};

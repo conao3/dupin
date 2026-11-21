@@ -1,12 +1,12 @@
 //! Run a provider from the command line, through a `Searcher` as the app does:
-//! `cargo run -p dupin-mac --example search -- apps saf` or `-- files invoice`.
+//! `cargo run -p dupin-mac --example search -- apps saf`, `-- files invoice` or `-- in invoice`.
 
 use std::sync::Arc;
 use std::sync::mpsc;
 use std::time::Instant;
 
 use dupin_core::{Delivery, Provider, Searcher};
-use dupin_mac::{AppsProvider, SpotlightProvider};
+use dupin_mac::{AppsProvider, SpotlightProvider, Target};
 
 fn main() {
     let mut args = std::env::args().skip(1);
@@ -14,8 +14,9 @@ fn main() {
     let query = args.collect::<Vec<_>>().join(" ");
     let provider: Arc<dyn Provider> = match kind.as_str() {
         "apps" => Arc::new(AppsProvider::standard()),
-        "files" => Arc::new(SpotlightProvider),
-        _ => return eprintln!("usage: search apps|files <query>"),
+        "files" => Arc::new(SpotlightProvider::new(Target::Names)),
+        "in" => Arc::new(SpotlightProvider::new(Target::Contents)),
+        _ => return eprintln!("usage: search apps|files|in <query>"),
     };
     let (tx, rx) = mpsc::channel();
     let searcher = Searcher::spawn(&kind, provider, move |d| drop(tx.send(d)));

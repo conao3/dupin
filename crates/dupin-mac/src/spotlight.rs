@@ -17,19 +17,35 @@ use objc2_foundation::{
 /// cancel lands within a frame or two and the first results show at once, long enough not to spin.
 const SLICE: Duration = Duration::from_millis(16);
 
+/// What a Spotlight search matches the query words against.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Target {
+    /// File and display names, anywhere in the name.
+    Names,
+    /// The text Spotlight indexed from inside files, by word prefix.
+    Contents,
+}
+
 /// Spotlight's file search. Its `search` must run on a thread it can turn the run loop of,
 /// which a [`Searcher`](dupin_core::Searcher)'s dedicated worker is.
-#[derive(Default)]
-pub struct SpotlightProvider;
+pub struct SpotlightProvider {
+    target: Target,
+}
 
-impl Provider for SpotlightProvider {
-    fn search(&self, request: &Request, emit: &mut dyn FnMut(Vec<Item>)) {
-        autoreleasepool(|_| run_query(request, emit));
+impl SpotlightProvider {
+    pub fn new(target: Target) -> Self {
+        SpotlightProvider { target }
     }
 }
 
-fn run_query(request: &Request, emit: &mut dyn FnMut(Vec<Item>)) {
-    let Some(predicate) = predicate(&request.query) else {
+impl Provider for SpotlightProvider {
+    fn search(&self, request: &Request, emit: &mut dyn FnMut(Vec<Item>)) {
+        autoreleasepool(|_| run_query(self.target, request, emit));
+    }
+}
+
+fn run_query(target: Target, request: &Request, emit: &mut dyn FnMut(Vec<Item>)) {
+    let Some(predicate) = predicate(target, &request.query) else {
         return;
     };
     let query = NSMetadataQuery::new();
@@ -92,18 +108,25 @@ fn item(result: &AnyObject, query: &str) -> Option<Item> {
     Some(Item::path(ItemKind::File, path, title, matched))
 }
 
-fn predicate(query: &str) -> Option<Retained<NSPredicate>> {
-    NSPredicate::predicateFromMetadataQueryString(&NSString::from_str(&query_string(query)?))
+fn predicate(target: Target, query: &str) -> Option<Retained<NSPredicate>> {
+    NSPredicate::predicateFromMetadataQueryString(&NSString::from_str(&query_string(target, query)?))
 }
 
-/// The Spotlight query string for `query`: every word must appear in the file name or the
-/// display name, ignoring case and diacritics. None for a query with no words.
-pub fn query_string(query: &str) -> Option<String> {
+/// The Spotlight query string for `query`, ignoring case and diacritics; every word must
+/// match. For names a word may appear anywhere in the file or display name; for contents it
+/// must start a word of the indexed text (`w`), which the index answers quickly where a
+/// substring of the whole text would scan it. None for a query with no words.
+pub fn query_string(target: Target, query: &str) -> Option<String> {
     let clauses: Vec<String> = query
         .split_whitespace()
         .map(|word| {
             let w = escape(word);
-            format!("(kMDItemFSName == \"*{w}*\"cd || kMDItemDisplayName == \"*{w}*\"cd)")
+            match target {
+                Target::Names => {
+                    format!("(kMDItemFSName == \"*{w}*\"cd || kMDItemDisplayName == \"*{w}*\"cd)")
+                }
+                Target::Contents => format!("kMDItemTextContent == \"{w}*\"cdw"),
+            }
         })
         .collect();
     (!clauses.is_empty()).then(|| clauses.join(" && "))
@@ -129,11 +152,19 @@ mod tests {
     #[test]
     fn every_word_must_match_a_name() {
         assert_eq!(
-            query_string("tax  2026").unwrap(),
+            query_string(Target::Names, "tax  2026").unwrap(),
             "(kMDItemFSName == \"*tax*\"cd || kMDItemDisplayName == \"*tax*\"cd) && \
              (kMDItemFSName == \"*2026*\"cd || kMDItemDisplayName == \"*2026*\"cd)"
         );
-        assert_eq!(query_string("   "), None);
+        assert_eq!(query_string(Target::Names, "   "), None);
+    }
+
+    #[test]
+    fn every_word_must_start_a_word_of_the_contents() {
+        assert_eq!(
+            query_string(Target::Contents, "quarterly rep").unwrap(),
+            "kMDItemTextContent == \"quarterly*\"cdw && kMDItemTextContent == \"rep*\"cdw"
+        );
     }
 
     #[test]
@@ -143,6 +174,8 @@ mod tests {
 
     #[test]
     fn the_query_string_parses_as_a_predicate() {
-        assert!(predicate(r#"weird "name" *.txt"#).is_some());
+        for target in [Target::Names, Target::Contents] {
+            assert!(predicate(target, r#"weird "name" *.txt"#).is_some(), "{target:?}");
+        }
     }
 }
