@@ -18,6 +18,9 @@ const MAX_DEPTH: usize = 2;
 pub struct App {
     pub name: String,
     pub path: PathBuf,
+    /// The bundle behind a symlink (Safari lives in a Cryptex and /Applications links to
+    /// it): Finder draws an alias badge on the link's icon but not on the bundle's.
+    pub icon: PathBuf,
 }
 
 pub struct AppsProvider {
@@ -117,9 +120,15 @@ fn walk(dir: &Path, depth: usize, out: &mut Vec<App>) {
         }
         if path.extension().is_some_and(|e| e == "app") {
             if let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
+                let icon = if kind.is_symlink() {
+                    fs::canonicalize(&path).unwrap_or_else(|_| path.clone())
+                } else {
+                    path.clone()
+                };
                 out.push(App {
                     name: name.to_owned(),
                     path,
+                    icon,
                 });
             }
         } else if depth + 1 < MAX_DEPTH {
@@ -159,12 +168,31 @@ mod tests {
     }
 
     #[test]
+    fn a_linked_bundle_takes_its_icon_from_the_target() {
+        let root = tree(&["Real/Linked.app/Contents"]);
+        let apps_dir = root.join("Apps");
+        fs::create_dir_all(&apps_dir).unwrap();
+        std::os::unix::fs::symlink(root.join("Real/Linked.app"), apps_dir.join("Linked.app")).unwrap();
+        let apps = scan(std::slice::from_ref(&apps_dir));
+        assert_eq!(apps[0].path, apps_dir.join("Linked.app"));
+        assert_eq!(
+            apps[0].icon,
+            fs::canonicalize(root.join("Real/Linked.app")).unwrap()
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn ranks_by_fuzzy_score() {
         let apps: Vec<App> = ["Safari Technology Preview", "Safari", "Hush Safe", "Notes"]
             .iter()
-            .map(|n| App {
-                name: (*n).into(),
-                path: PathBuf::from(format!("/Applications/{n}.app")),
+            .map(|n| {
+                let path = PathBuf::from(format!("/Applications/{n}.app"));
+                App {
+                    name: (*n).into(),
+                    icon: path.clone(),
+                    path,
+                }
             })
             .collect();
         let titles: Vec<_> = rank(&apps, "saf", 10).into_iter().map(|i| i.title).collect();
