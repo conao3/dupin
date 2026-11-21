@@ -1,0 +1,5 @@
+self-hosted-runner:
+  # Blacksmith runners (docs.blacksmith.sh, "Instance Types").
+  labels:
+    - blacksmith-2vcpu-ubuntu-2404
+    - blacksmith-6vcpu-macos-latest
