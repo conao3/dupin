@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use dupin_core::{Config, Delivery, Effect, History, Intent, Mode, Position, Searcher, Session};
+use dupin_core::{Config, Delivery, Effect, History, InputSource, Intent, Mode, Position, Searcher, Session};
 use dupin_mac::{AppsProvider, SpotlightProvider, Target};
 use rune::{
     Align, AppHandle, DisplayTarget, Image, ImageCache, Key, KeyEvent, OverlayPlacement, ScreenEdge,
@@ -35,6 +35,9 @@ pub struct Ui {
     file_limit: usize,
     saver: crate::store::Saver,
     position: Position,
+    input_source: InputSource,
+    /// The input source to put back when the panel hides, if showing it switched one.
+    restore_input: Option<dupin_mac::input_source::Previous>,
     me: AppHandle<Ui>,
 }
 
@@ -67,6 +70,8 @@ impl Ui {
             ),
             file_limit: config.file_limit,
             position: config.position,
+            input_source: config.input_source,
+            restore_input: None,
             me,
         }
     }
@@ -107,7 +112,21 @@ impl Ui {
                 inset: 0.0,
             },
         );
+        self.force_input_source();
         self.me.show();
+    }
+
+    fn force_input_source(&mut self) {
+        use dupin_mac::input_source::{Target, select};
+        if self.restore_input.is_some() {
+            return;
+        }
+        let target = match &self.input_source {
+            InputSource::Keep => return,
+            InputSource::Ascii => Target::Ascii,
+            InputSource::Id(id) => Target::Id(id.clone()),
+        };
+        self.restore_input = select(&target);
     }
 
     /// Hide and reset, as Esc and losing focus do.
@@ -118,6 +137,9 @@ impl Ui {
     }
 
     fn hide(&mut self, tx: &mut Tx) {
+        if let Some(previous) = self.restore_input.take() {
+            previous.restore();
+        }
         self.query.clear();
         self.notice = None;
         tx.close_window();

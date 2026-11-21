@@ -6,9 +6,14 @@ Dupin reads `$XDG_CONFIG_HOME/dupin/config.toml`, or `~/.config/dupin/config.tom
 hotkey = "cmd+space" # modifiers cmd, alt, ctrl, shift, joined with + to a key
 file_limit = 200 # the most files a Spotlight search shows
 position = "center" # "center" puts the field at the middle of the display; "top" near its top
+input_source = "ascii" # "ascii", "keep", or an input source identifier such as "com.apple.keylayout.ABC"
 ```
 
 An unknown key or an invalid value makes Dupin fall back to the defaults and say why, in the log and in the panel.
+
+## Input source
+
+Like Alfred's "Force Keyboard", Dupin switches the keyboard input source while the panel shows and switches back when it hides, so a Japanese or other input method doesn't hold the query in composition. `"ascii"` picks the most recently used source that types ASCII (ABC, or an input method's Roman mode); an identifier picks that source; `"keep"` leaves the input source alone.
 
 ## Freeing the hotkey
 
