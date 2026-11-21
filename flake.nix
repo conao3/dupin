@@ -65,6 +65,7 @@
         '';
         meta = {
           description = "A lightweight resident launcher for Apple silicon Macs";
+          homepage = "https://dupin.app";
           mainProgram = "dupin";
           platforms = [ system ];
         };

@@ -2,6 +2,8 @@
 
 A lightweight, resident launcher for Apple silicon Macs, built with [Rune](https://github.com/anomalyco/rune).
 
+Homepage: <https://dupin.app>
+
 Named after C. Auguste Dupin, Poe's detective: the source of the line of Mac launchers that runs Sherlock → Watson → Alfred.
 
 ## Before you start: free ⌘Space
