@@ -3,6 +3,7 @@
 
 pub mod apps;
 pub mod spotlight;
+pub mod window;
 pub mod workspace;
 
 pub use apps::AppsProvider;

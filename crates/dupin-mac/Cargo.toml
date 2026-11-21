@@ -23,7 +23,7 @@ objc2-foundation = { workspace = true, features = [
     "NSString",
     "NSURL",
 ] }
-objc2-app-kit = { workspace = true, features = ["std", "NSWorkspace"] }
+objc2-app-kit = { workspace = true, features = ["std", "NSResponder", "NSView", "NSWindow", "NSWorkspace"] }
 
 [lints]
 workspace = true

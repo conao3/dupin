@@ -43,7 +43,8 @@ fn main() {
             let handle = handle.clone();
             move || ui::Ui::new(handle, config, config_problem)
         })
-        .on_ready(move |_| {
+        .on_ready(move |window| {
+            appear_instantly(window);
             // Once per process: a launcher window is made once and kept, but be explicit.
             if !std::mem::replace(&mut registered, true) {
                 hotkey::register(&handle, &hotkey);
@@ -64,4 +65,18 @@ fn main() {
             .into();
         [panel]
     });
+}
+
+/// Turn off AppKit's ordering animation on the panel. `on_ready` runs once the panel exists
+/// (Rune moves the content into its own NSPanel at creation), on the main thread.
+fn appear_instantly(window: &rune::WindowHandle) {
+    use rune::raw_window_handle::RawWindowHandle;
+    let done = window.with_raw_handle(|handle| match handle.as_raw() {
+        // SAFETY: The handle is borrowed inside `with_raw_handle`, so its view is alive.
+        RawWindowHandle::AppKit(appkit) => unsafe { dupin_mac::window::appear_instantly(appkit.ns_view) },
+        _ => false,
+    });
+    if done != Ok(true) {
+        log::warn(&format!("couldn't turn off the panel's show animation: {done:?}"));
+    }
 }
