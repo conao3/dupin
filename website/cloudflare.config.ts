@@ -6,6 +6,7 @@ export default defineConfig({
 		name: 'dupin',
 		compatibilityDate: '2026-11-21',
 		domains: ['dupin.app'],
+		previewUrls: true,
 		assets: {
 			htmlHandling: 'auto-trailing-slash',
 			notFoundHandling: '404-page',
