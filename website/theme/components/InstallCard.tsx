@@ -15,6 +15,7 @@ export function InstallCard() {
 				>
 					<CopyIcon />
 				</button>
+				<span class="visually-hidden" role="status" data-copy-status />
 			</div>
 			<div class="install-row">
 				<span class="install-label">Requires</span>

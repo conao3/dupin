@@ -4,16 +4,22 @@ onScroll();
 window.addEventListener('scroll', onScroll, { passive: true });
 
 for (const button of document.querySelectorAll('[data-copy]')) {
+	const status = button.parentElement?.querySelector('[data-copy-status]');
 	let timer;
 	button.addEventListener('click', async () => {
 		try {
 			await navigator.clipboard.writeText(button.dataset.copy);
 		} catch {
+			if (status) status.textContent = 'Could not copy. Select the command to copy it instead.';
 			return;
 		}
+		if (status) status.textContent = 'Copied the install command.';
 		button.classList.add('is-copied');
 		clearTimeout(timer);
-		timer = setTimeout(() => button.classList.remove('is-copied'), 1400);
+		timer = setTimeout(() => {
+			button.classList.remove('is-copied');
+			if (status) status.textContent = '';
+		}, 1400);
 	});
 }
 
