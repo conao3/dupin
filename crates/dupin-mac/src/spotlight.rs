@@ -4,6 +4,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
+use dupin_core::fuzzy;
 use dupin_core::{Item, ItemKind, Provider, Request};
 use objc2::rc::{Retained, autoreleasepool};
 use objc2::runtime::AnyObject;
@@ -62,7 +63,7 @@ fn run_query(request: &Request, emit: &mut dyn FnMut(Vec<Item>)) {
         let gathering = query.isGathering();
         let count = query.resultCount().min(request.limit);
         let batch: Vec<Item> = (seen..count)
-            .filter_map(|i| item(&query.resultAtIndex(i)))
+            .filter_map(|i| item(&query.resultAtIndex(i), &request.query))
             .collect();
         query.enableUpdates();
         seen = count;
@@ -76,14 +77,19 @@ fn run_query(request: &Request, emit: &mut dyn FnMut(Vec<Item>)) {
     query.stopQuery();
 }
 
-fn item(result: &AnyObject) -> Option<Item> {
+fn item(result: &AnyObject, query: &str) -> Option<Item> {
     let result: &NSMetadataItem = result.downcast_ref()?;
     // SAFETY: The path key is a valid attribute name constant.
     let path = result.valueForAttribute(unsafe { NSMetadataItemPathKey })?;
     let path: Retained<NSString> = path.downcast().ok()?;
     let path = PathBuf::from(path.to_string());
     let title = path.file_name()?.to_string_lossy().into_owned();
-    Some(Item::path(ItemKind::File, path, title, Vec::new()))
+    // Spotlight matched each word somewhere in the name; highlight where the fuzzy matcher
+    // finds the query, when it does.
+    let matched = fuzzy::score(query, &title)
+        .map(|m| m.positions)
+        .unwrap_or_default();
+    Some(Item::path(ItemKind::File, path, title, matched))
 }
 
 fn predicate(query: &str) -> Option<Retained<NSPredicate>> {
