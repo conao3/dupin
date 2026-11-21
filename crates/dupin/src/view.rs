@@ -5,7 +5,10 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use dupin_core::session::Results;
 use dupin_core::{Item, Mode};
 use rune::tok::{self, type_};
-use rune::{Color, Cx, El, GrowthSpec, ScrollSpec, Span, TextStyle, col, el, rich, row, text, text_input};
+use rune::{
+    Color, Cx, El, GrowthSpec, ScrollSpec, Span, SystemMaterial, TextStyle, col, el, rich, row, text,
+    text_input,
+};
 
 use crate::ui::{ICON_SIZE, Ui};
 
@@ -15,6 +18,8 @@ const ROW_H: f32 = 52.0;
 /// Rows shown before the list scrolls.
 const VISIBLE_ROWS: usize = 8;
 const LIST_PAD: f32 = 6.0;
+/// How much of the theme's card colour covers the glass.
+const FROST: f32 = 0.45;
 const WARNING: Color = Color {
     r: 0.95,
     g: 0.55,
@@ -27,13 +32,16 @@ pub fn view(s: &Ui, cx: &mut Cx<Ui>) -> El {
     let t = tok::theme(dark);
     let accent = tok::accent(0, dark);
 
+    // A light frost over the glass keeps text readable over whatever is behind the panel.
+    let ink = if dark { Color::WHITE } else { Color::BLACK };
     let mut panel = col()
-        .key("panel")
+        .key("frost")
         .w_full()
         .radius(RADIUS)
+        .continuous_corners()
         .clip_rounded(RADIUS)
-        .fill(t.card)
-        .border(1.0, t.card_border)
+        .fill(t.card.alpha(FROST))
+        .border(1.0, ink.alpha(0.08))
         .child(header(s, &t, accent));
     if let Some(notice) = &s.notice {
         panel = panel.child(divider(&t)).child(
@@ -65,7 +73,18 @@ pub fn view(s: &Ui, cx: &mut Cx<Ui>) -> El {
                 .child(text(hint).font(type_::BODY).color(t.text_secondary)),
         );
     }
-    col().w_full().child(panel)
+    // Liquid Glass (NSGlassEffectView) under the panel on macOS 26 and later. Headless renders
+    // and opaque windows draw the fill instead, so screenshots show the plain card.
+    col().w_full().child(
+        col()
+            .key("panel")
+            .w_full()
+            .radius(RADIUS)
+            .continuous_corners()
+            .fill(t.card)
+            .system_material(SystemMaterial::Glass)
+            .child(panel),
+    )
 }
 
 fn header(s: &Ui, t: &tok::Theme, accent: Color) -> El {

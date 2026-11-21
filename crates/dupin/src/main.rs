@@ -27,7 +27,13 @@ fn main() {
             view::view,
         )
     };
-    let app = App::new(spec).windowless().accessory().fit_content_height();
+    // Blend in sRGB as Core Animation does, so the translucent frost over the glass reads as a
+    // native layer would.
+    let app = App::new(spec)
+        .windowless()
+        .accessory()
+        .fit_content_height()
+        .srgb_blend(true);
     let handle = app.handle();
     let hotkey = config.hotkey.clone();
     let mut registered = false;
