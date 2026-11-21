@@ -11,9 +11,15 @@ pub enum Mode {
     /// Fuzzy search over installed apps.
     #[default]
     Apps,
-    /// Spotlight file search, entered with Space on an empty query (as Alfred does).
+    /// Spotlight search by file name, entered with Space on an empty query (as Alfred does).
     Files,
+    /// Spotlight search inside files, entered by typing the keyword `in` and Space (Alfred's
+    /// `in`).
+    Contents,
 }
+
+/// Typed before Space in the apps search, enters [`Mode::Contents`].
+pub const CONTENTS_KEYWORD: &str = "in";
 
 /// Keys the session gives meaning to. The UI maps raw keys onto these.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -45,6 +51,8 @@ pub enum Effect {
     Hide,
     /// The selection moved; keep the selected row on screen.
     RevealSelection,
+    /// Empty the text field: a mode keyword was consumed. The session's query is already empty.
+    ClearQuery,
 }
 
 /// Where the results on screen stand relative to the current query.
@@ -132,11 +140,17 @@ impl Session {
         Some(match intent {
             Intent::Space if empty => match self.mode {
                 Mode::Apps => self.switch(Mode::Files),
-                // A leading space finds nothing in either mode; swallow it.
-                Mode::Files => Vec::new(),
+                // A leading space finds nothing in a file search; swallow it.
+                Mode::Files | Mode::Contents => Vec::new(),
             },
+            Intent::Space if self.mode == Mode::Apps && self.query == CONTENTS_KEYWORD => {
+                self.query.clear();
+                let mut effects = vec![Effect::ClearQuery];
+                effects.extend(self.switch(Mode::Contents));
+                effects
+            }
             Intent::Backspace if empty => match self.mode {
-                Mode::Files => self.switch(Mode::Apps),
+                Mode::Files | Mode::Contents => self.switch(Mode::Apps),
                 Mode::Apps => return None,
             },
             Intent::Space | Intent::Backspace => return None,
@@ -236,12 +250,8 @@ impl Session {
         }
         let query = query.to_owned();
         self.generation += 1;
-        // A mode switch shows nothing of the other mode's rows.
-        let keep_rows = self.items.first().is_some_and(|i| self.mode == mode_of(i));
-        if !keep_rows {
-            self.items.clear();
-            self.selected = 0;
-        }
+        // The rows on screen are this mode's: every mode change goes through an empty query,
+        // which cleared them.
         self.results = Results::Searching { replaced: false };
         vec![Effect::Search {
             mode: self.mode,
@@ -256,13 +266,6 @@ impl Session {
         self.items.clear();
         self.selected = 0;
         self.results = Results::Idle;
-    }
-}
-
-fn mode_of(item: &Item) -> Mode {
-    match item.kind {
-        crate::ItemKind::Application => Mode::Apps,
-        crate::ItemKind::File => Mode::Files,
     }
 }
 

@@ -230,3 +230,69 @@ fn a_click_selects_by_id_even_after_rows_move() {
     assert!(!s.select_id("/x/gone"));
     assert_eq!(s.selected(), 2);
 }
+
+#[test]
+fn the_in_keyword_enters_content_search_and_clears_the_field() {
+    let mut s = Session::default();
+    s.set_query("in");
+    let effects = s.intent(Intent::Space).unwrap();
+    assert_eq!(effects.first(), Some(&Effect::ClearQuery));
+    assert_eq!(s.mode(), Mode::Contents);
+    assert_eq!(s.query(), "");
+    let effects = s.set_query("quarterly report");
+    assert_eq!(searched(&effects).0, Mode::Contents);
+    assert_eq!(searched(&effects).2, "quarterly report");
+}
+
+#[test]
+fn the_in_keyword_cancels_the_apps_search_it_started() {
+    let mut s = Session::default();
+    s.set_query("i");
+    s.set_query("in");
+    assert_eq!(
+        s.intent(Intent::Space),
+        Some(vec![Effect::ClearQuery, Effect::CancelSearch])
+    );
+    assert!(s.items().is_empty());
+}
+
+#[test]
+fn in_is_only_a_keyword_on_its_own_in_the_apps_search() {
+    let mut s = Session::default();
+    s.set_query("ins");
+    assert_eq!(s.intent(Intent::Space), None);
+    s.set_query("");
+    s.intent(Intent::Space);
+    s.set_query("in");
+    // In file search, "in " is an ordinary query.
+    assert_eq!(s.intent(Intent::Space), None);
+    assert_eq!(s.mode(), Mode::Files);
+}
+
+#[test]
+fn backspace_on_an_empty_query_leaves_content_search() {
+    let mut s = Session::default();
+    s.set_query("in");
+    s.intent(Intent::Space);
+    assert_eq!(
+        s.intent(Intent::Space),
+        Some(vec![]),
+        "a leading space is swallowed"
+    );
+    assert_eq!(s.intent(Intent::Backspace), Some(vec![]));
+    assert_eq!(s.mode(), Mode::Apps);
+}
+
+#[test]
+fn content_results_stay_on_screen_while_the_query_grows() {
+    let mut s = Session::default();
+    s.set_query("in");
+    s.intent(Intent::Space);
+    let g = searched(&s.set_query("tax")).1;
+    s.deliver(Delivery::Batch {
+        generation: g,
+        items: vec![item(ItemKind::File, "2026.pdf")],
+    });
+    searched(&s.set_query("tax 2"));
+    assert_eq!(s.items().len(), 1, "no flash of an empty list between keystrokes");
+}
