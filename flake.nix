@@ -12,6 +12,8 @@
       url = "github:numtide/treefmt-nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    # agent-desktop for the E2E job; its own nixpkgs keeps cache.numtide.com hits.
+    llm-agents.url = "github:numtide/llm-agents.nix";
   };
 
   outputs =

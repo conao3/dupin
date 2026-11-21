@@ -22,15 +22,15 @@ cargo run -p dupin-mac --example search -- in invoice # a provider from the term
 
 ## Nix layout
 
-| File                | Holds                                                                       |
-| ------------------- | --------------------------------------------------------------------------- |
-| `flake.nix`         | Inputs and the flake-parts modules below                                    |
-| `package.nix`       | The Dupin package (`callPackage` style), with `Dupin.app` around the binary |
-| `default.nix`       | `package.nix` for non-flake use                                             |
-| `nix/packages.nix`  | `packages.dupin` and `packages.default`                                     |
-| `nix/checks.nix`    | Clippy and the tests in one debug build                                     |
-| `nix/treefmt.nix`   | The formatters and linters behind `nix fmt` and `checks.treefmt`            |
-| `nix/dev-shell.nix` | The development shell                                                       |
+| File                | Holds                                                                                                                       |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `flake.nix`         | Inputs and the flake-parts modules below                                                                                    |
+| `package.nix`       | The Dupin package (`callPackage` style), with `Dupin.app` around the binary and its icon drawn from `assets/logo/dupin.svg` |
+| `default.nix`       | `package.nix` for non-flake use                                                                                             |
+| `nix/packages.nix`  | `packages.dupin` and `packages.default`                                                                                     |
+| `nix/checks.nix`    | Clippy and the tests in one debug build                                                                                     |
+| `nix/treefmt.nix`   | The formatters and linters behind `nix fmt` and `checks.treefmt`                                                            |
+| `nix/dev-shell.nix` | The development shell                                                                                                       |
 
 The version lives in `VERSION` (see [releasing](./releasing.md)). `package.nix` holds the hash of the vendored Cargo dependencies; after `Cargo.lock` changes, refresh it with `nu scripts/update-cargo-hash.nu` (nix-update). The vendor derivation's name carries `Cargo.lock`'s hash, so a stale hash fails the next local build instead of only CI.
 
@@ -49,11 +49,26 @@ nu scripts/snap.nu
 
 The renders show real results from the machine, file paths included, so they stay out of the repository. Headless renders draw the panel's plain card where a window shows Liquid Glass.
 
+## Peak memory
+
+Dupin's physical footprint peaks at about 380–400 MB while it draws, then falls back to about 30 MB. Almost all of the peak is the Apple GPU driver's: the first render pass a process submits charges it about 185 MB, and the first blit (Rune's texture uploads) about 135 MB more, whatever the size of the work. The driver frees it within a second of the GPU going idle and charges it again on the next frame. A bare Metal blit and render pass from `osascript`, with no Rune, shows both charges and peaks at 327 MB; Rune's own `examples/hello` peaks at 373 MB and Dupin at 377 MB (headless `--snap` on an M5 Max). Launchers drawn with AppKit don't pay this, because WindowServer composites their layers out of process.
+
+Dupin can't avoid this without drawing outside Metal. `scripts/footprint.nu` renders each headless scenario and fails if one's whole peak footprint, the driver's charge included, goes over a budget (450 MB by default). The driver's charge scales with the GPU, so the budget only holds for one Mac and build configuration; pass `--budget` on others:
+
+```sh
+cargo build -p dupin
+nu scripts/footprint.nu
+```
+
 ## Timing a summon
 
-`DUPIN_TRACE=1` prints, for each summon, when the hotkey handler ran and when the next frame was drawn, with wall-clock times to line up with an outside measurement of when the window reached the screen.
+`DUPIN_TRACE=1` prints when the launch hotkey is registered and, for each summon, when the hotkey handler ran and when the next frame was drawn, with wall-clock times to line up with an outside measurement of when the window reached the screen.
 
 Scripts in this repository are written in Nushell.
+
+## Logo
+
+`assets/logo/dupin.svg` is the app icon and `assets/logo/dupin-mark.svg` a monochrome `currentColor` mark, for template images such as a menu-bar item. They are the only tracked logo sources: the Nix build draws every icon size from `dupin.svg` with resvg and packs them with icnsutil, so no generated PNG or icns is committed.
 
 ## Website
 
