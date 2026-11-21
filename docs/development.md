@@ -61,9 +61,10 @@ Scripts in this repository are written in Nushell.
 
 ```sh
 just website::install # dependencies from the lockfile
-just website::dev     # local server
+just website::dev     # local server (ox-content's dev server uses its default theme, not website/theme/)
+just website::preview # build, then serve the real page with the redirects
 just website::lint    # oxlint, type-aware and type-checked through tsrs
-just website::deploy  # build, then upload dist/ as Cloudflare static assets with cf
+just website::deploy  # cf build, then upload the result as Cloudflare static assets
 ```
 
-Workers Builds deploys `main` to the `dupin` Worker on `dupin.app` and gives other branches a preview, whenever `website/` changes. `dupin.app/gh` redirects to the repository; the redirects are declared in `website/vite.config.ts`.
+Building and deploying go through `cf`, with the Cloudflare Vite plugin producing the Build Output. Workers Builds runs `pnpm run deploy` on `main` (the `dupin` Worker on `dupin.app`) and `cf previews deploy` on other branches, whenever `website/` changes. `dupin.app/gh` redirects to the repository; the redirects are declared in `website/vite.config.ts`.

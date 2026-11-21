@@ -3,13 +3,14 @@
 	"private": true,
 	"type": "module",
 	"scripts": {
-		"dev": "vite dev --configLoader runner",
-		"build": "vite build --configLoader runner",
-		"preview": "vite preview --configLoader runner",
-		"deploy": "pnpm build && cf deploy ./dist",
+		"dev": "cf dev",
+		"build": "cf build",
+		"preview": "cf build && vite preview",
+		"deploy": "cf deploy",
 		"lint": "oxlint"
 	},
 	"devDependencies": {
+		"@cloudflare/vite-plugin": "2.0.0-rc.3",
 		"@ox-content/theme-color-vitesse": "3.8.3",
 		"@ox-content/vite-plugin": "3.8.3",
 		"@ryoppippi/vite-plugin-cloudflare-redirect": "1.1.3",
