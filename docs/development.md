@@ -57,13 +57,13 @@ Scripts in this repository are written in Nushell.
 
 ## Website
 
-`website/` holds the landing page for <https://dupin.app>: an [ox-content](https://github.com/ubugeeei-prod/ox-content) static site with its own pnpm project. The page layout is JSX in `website/theme/`; the install steps are Markdown in `website/content/index.md`.
+`website/` holds the landing page for <https://dupin.app>: an [ox-content](https://github.com/ubugeeei-prod/ox-content) static site with its own pnpm project. The page layout is JSX in `website/theme/`; the install steps are Markdown in `website/content/index.md`. The development shell provides Node.js and the pnpm version that `website/package.json` pins (`nix flake check` fails when they differ).
 
 ```sh
-pnpm -C website install
-pnpm -C website dev    # local server
-pnpm -C website lint   # oxlint, type-aware and type-checked through tsrs
-pnpm -C website deploy # build, then upload dist/ as Cloudflare static assets with cf
+just website::install # dependencies from the lockfile
+just website::dev     # local server
+just website::lint    # oxlint, type-aware and type-checked through tsrs
+just website::deploy  # build, then upload dist/ as Cloudflare static assets with cf
 ```
 
-`dupin.app/gh` redirects to the repository; the redirects are declared in `website/vite.config.ts`.
+Workers Builds deploys `main` to the `dupin` Worker on `dupin.app` and gives other branches a preview, whenever `website/` changes. `dupin.app/gh` redirects to the repository; the redirects are declared in `website/vite.config.ts`.
