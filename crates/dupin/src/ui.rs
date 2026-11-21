@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use dupin_core::{Config, Delivery, Effect, Intent, Mode, Position, Searcher, Session};
+use dupin_core::{Config, Delivery, Effect, History, Intent, Mode, Position, Searcher, Session};
 use dupin_mac::{AppsProvider, SpotlightProvider, Target};
 use rune::{
     Align, AppHandle, DisplayTarget, Image, ImageCache, Key, KeyEvent, OverlayPlacement, ScreenEdge,
@@ -33,12 +33,13 @@ pub struct Ui {
     files: Searcher,
     contents: Searcher,
     file_limit: usize,
+    saver: crate::store::Saver,
     position: Position,
     me: AppHandle<Ui>,
 }
 
 impl Ui {
-    pub fn new(me: AppHandle<Ui>, config: Config, notice: Option<String>) -> Ui {
+    pub fn new(me: AppHandle<Ui>, config: Config, history: History, notice: Option<String>) -> Ui {
         let apps_provider = Arc::new(AppsProvider::standard());
         // Scan before the first keystroke so it doesn't wait for the disk.
         let warm = apps_provider.clone();
@@ -47,7 +48,8 @@ impl Ui {
         let mut query = TextEdit::new("");
         query.focused = true;
         Ui {
-            session: Session::default(),
+            session: Session::new(history),
+            saver: crate::store::Saver::spawn(),
             query,
             notice,
             icons: HashMap::new(),
@@ -197,6 +199,7 @@ impl Ui {
                 }
                 Effect::CancelSearch => self.searchers().iter().for_each(|(_, s)| s.cancel()),
                 Effect::ClearQuery => self.query.clear(),
+                Effect::SaveHistory => self.saver.save(self.session.history()),
                 Effect::Run(action) => {
                     // Launch Services can take a moment to answer; don't hold the frame for it.
                     std::thread::spawn(move || {

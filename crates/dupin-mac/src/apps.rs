@@ -170,7 +170,7 @@ pub fn rank(apps: &[App], query: &str, limit: usize) -> Vec<Item> {
     hits.sort_by(|(a, _, _, x), (b, _, _, y)| b.cmp(a).then_with(|| x.name.cmp(&y.name)));
     hits.truncate(limit);
     hits.into_iter()
-        .map(|(_, alias, positions, app)| {
+        .map(|(score, alias, positions, app)| {
             let item = Item::path(
                 ItemKind::Application,
                 app.path.clone(),
@@ -179,6 +179,7 @@ pub fn rank(apps: &[App], query: &str, limit: usize) -> Vec<Item> {
             );
             Item {
                 icon: Some(app.icon.clone()),
+                score: Some(score),
                 subtitle: match alias {
                     Some(alias) => format!("{alias} · {}", item.subtitle),
                     None => item.subtitle.clone(),
