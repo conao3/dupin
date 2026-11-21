@@ -53,3 +53,7 @@ open result/Applications/Dupin.app
         <img src="https://sponsors.ryoppippi.com/sponsors.png" alt="Sponsors">
     </a>
 </p>
+
+## License
+
+Dupin is licensed under [GPL-3.0-or-later](./LICENSE). Contributions need the [Contributor License Agreement](./CLA.md); see [CONTRIBUTING.md](./CONTRIBUTING.md).
