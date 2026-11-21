@@ -133,7 +133,7 @@ impl Session {
         self.search()
     }
 
-    /// A key the UI recognised. None leaves the key to the text field (typing a space into a
+    /// A key the UI recognized. None leaves the key to the text field (typing a space into a
     /// query, deleting a character); Some consumes it, even when nothing else happens.
     pub fn intent(&mut self, intent: Intent) -> Option<Vec<Effect>> {
         let empty = self.query.is_empty();
@@ -261,7 +261,7 @@ impl Session {
     }
 
     fn clear_results(&mut self) {
-        // Bump the generation so answers still in flight are recognised as stale.
+        // Bump the generation so answers still in flight are recognized as stale.
         self.generation += 1;
         self.items.clear();
         self.selected = 0;

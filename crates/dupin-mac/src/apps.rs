@@ -19,7 +19,7 @@ const MAX_DEPTH: usize = 2;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct App {
-    /// The name Finder shows: localised, without `.app`.
+    /// The name Finder shows: localized, without `.app`.
     pub name: String,
     /// Other names that should find the app: the file name when it differs from `name`, and
     /// Spotlight's alternate names and keywords (ChatGPT.app answers to "Codex", its former

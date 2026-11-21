@@ -7,7 +7,7 @@ use objc2::rc::autoreleasepool;
 use objc2::runtime::AnyObject;
 use objc2_foundation::{NSArray, NSFileManager, NSMetadataItem, NSString, NSURL};
 
-/// Finder's (localised) display name for `path`, and Spotlight's alternate names and keywords
+/// Finder's (localized) display name for `path`, and Spotlight's alternate names and keywords
 /// for it. An app Spotlight hasn't indexed has none of the latter.
 pub fn lookup(path: &Path) -> (String, Vec<String>) {
     let Some(path) = path.to_str() else {
