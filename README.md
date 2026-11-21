@@ -1,4 +1,8 @@
-# Dupin
+<p align="center">
+    <img src="./assets/logo/dupin.svg" alt="Dupin" width="128" height="128">
+</p>
+
+<h1 align="center">Dupin</h1>
 
 A lightweight, resident launcher for Apple silicon Macs, built with [Rune](https://github.com/anomalyco/rune).
 

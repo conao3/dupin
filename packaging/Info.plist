@@ -8,6 +8,8 @@
 	<string>Dupin</string>
 	<key>CFBundleIdentifier</key>
 	<string>app.dupin.Dupin</string>
+	<key>CFBundleIconFile</key>
+	<string>dupin</string>
 	<key>CFBundleExecutable</key>
 	<string>dupin</string>
 	<key>CFBundlePackageType</key>

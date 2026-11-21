@@ -1,6 +1,8 @@
 {
   lib,
   rustPlatform,
+  resvg,
+  python3Packages,
 }:
 let
   root = ./.;
@@ -15,6 +17,7 @@ let
       (root + /rustfmt.toml)
       (root + /crates)
       (root + /packaging)
+      (root + /assets/logo/dupin.svg)
     ];
   };
 
@@ -55,11 +58,27 @@ rustPlatform.buildRustPackage (
     ];
     # Tests run in the lint-and-test check, in debug as cargo runs them.
     doCheck = false;
+    # The app icon is drawn from the logo here, so no generated image is committed. iconutil
+    # ships only with macOS, outside the sandbox; icnsutil writes the same icns.
+    nativeBuildInputs = [
+      resvg
+      python3Packages.icnsutil
+    ];
     postInstall = ''
       app=$out/Applications/Dupin.app/Contents
       mkdir -p $app/MacOS
       mv $out/bin/dupin $app/MacOS/dupin
       substitute packaging/Info.plist $app/Info.plist --subst-var-by version ${version}
+
+      # Every size an iconset has: 16 to 512 points, each also at 2x (up to 1024 pixels).
+      iconset=$(mktemp -d)
+      for size in 16 32 128 256 512; do
+        resvg -w $size -h $size assets/logo/dupin.svg $iconset/icon_''${size}x''${size}.png
+        resvg -w $((size * 2)) -h $((size * 2)) assets/logo/dupin.svg $iconset/icon_''${size}x''${size}@2x.png
+      done
+      mkdir -p $app/Resources
+      icnsutil compose --toc $app/Resources/dupin.icns $iconset/*.png
+      icnsutil test $app/Resources/dupin.icns
       ln -s $app/MacOS/dupin $out/bin/dupin
     '';
     passthru = { inherit commonArgs; };
