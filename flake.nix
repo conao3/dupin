@@ -10,8 +10,8 @@
       system = "aarch64-darwin";
       pkgs = nixpkgs.legacyPackages.${system};
       inherit (pkgs) lib;
-      cargoToml = lib.importTOML ./Cargo.toml;
-      version = cargoToml.workspace.package.version;
+      # tagpr bumps VERSION; crate versions stay 0.0.0 (see Cargo.toml).
+      version = lib.fileContents ./VERSION;
 
       src = lib.fileset.toSource {
         root = ./.;
@@ -30,8 +30,8 @@
       # Update the hash whenever Cargo.lock changes. Every Rust derivation shares this one.
       cargoDeps = pkgs.rustPlatform.fetchCargoVendor {
         inherit src;
-        name = "dupin-${version}-vendor";
-        hash = "sha256-ewNGqBdv3Le/O57ch9LhL1oJfFV5uJ7YL18Cu10fiMg=";
+        name = "dupin-vendor";
+        hash = "sha256-U4CblbqunzzNq3ULcWINogmkQYVl8nWuDFq47sVupWQ=";
       };
 
       # The Rust toolchain from nixpkgs matches the version Rune's rust-toolchain.toml pins.
