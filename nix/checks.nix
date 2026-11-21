@@ -1,3 +1,4 @@
+{ lib, ... }:
 let
   root = ./..;
 in
@@ -6,12 +7,12 @@ in
     { config, pkgs, ... }:
     let
       inherit (config.packages) dupin;
-      # A check that runs `script` over the repository's tracked files.
+      # A check that runs the Nushell `script` over the repository's tracked files.
       repoCheck =
         name: inputs: script:
-        pkgs.runCommand name { nativeBuildInputs = inputs; } ''
+        pkgs.runCommand name { nativeBuildInputs = [ pkgs.nushell ] ++ inputs; } ''
           cd ${root}
-          ${script}
+          nu --no-config-file --commands ${lib.escapeShellArg script}
           touch $out
         '';
     in
@@ -39,15 +40,16 @@ in
           }
         );
         gitleaks = repoCheck "dupin-gitleaks" [ pkgs.gitleaks ] ''
-          gitleaks detect --source . --config .gitleaks.toml --no-git --redact
+          ^gitleaks detect --source . --config .gitleaks.toml --no-git --redact
         '';
-        nushell-ide-check = repoCheck "dupin-nushell-ide-check" [ pkgs.nushell ] ''
-          for script in scripts/*.nu; do
-            if nu --no-config-file --ide-check 10 "$script" | grep -q '"severity":"Error"'; then
-              nu --no-config-file --ide-check 10 "$script"
-              exit 1
-            fi
-          done
+        nushell-ide-check = repoCheck "dupin-nushell-ide-check" [ ] ''
+          let errors = glob scripts/**/*.nu | each {|script|
+            nu --no-config-file --ide-check 10 $script | complete | get stdout | lines | each { from json }
+            | where severity? == "Error" | insert file $script
+          } | flatten
+          if ($errors | is-not-empty) {
+            error make {msg: ($errors | select file message | to text)}
+          }
         '';
       };
     };
