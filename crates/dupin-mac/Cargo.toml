@@ -14,6 +14,8 @@ objc2-foundation = { workspace = true, features = [
     "std",
     "NSArray",
     "NSDate",
+    "NSEnumerator",
+    "NSFileManager",
     "NSMetadata",
     "NSMetadataAttributes",
     "NSObjCRuntime",
