@@ -8,7 +8,7 @@ export function InstallCard() {
 				<span class="install-label">Nix</span>
 				<code class="install-value">{installCommand}</code>
 				<button
-					class="copy"
+					class="copy-button"
 					type="button"
 					data-copy={installCommand}
 					aria-label="Copy the install command"

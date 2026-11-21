@@ -301,7 +301,7 @@ code,
 	white-space: normal;
 }
 
-.copy,
+.copy-button,
 .install-more {
 	display: inline-flex;
 	align-items: center;
@@ -320,7 +320,7 @@ code,
 		border-color 0.18s ease;
 }
 
-.copy {
+.copy-button {
 	width: 36px;
 	padding: 0;
 }
@@ -330,13 +330,13 @@ code,
 	padding: 0 12px;
 }
 
-.copy:hover,
+.copy-button:hover,
 .install-more:hover {
 	color: var(--fg);
 	background: rgba(255, 255, 255, 0.04);
 }
 
-.copy svg {
+.copy-button svg {
 	width: 15px;
 	height: 15px;
 	fill: none;
@@ -344,7 +344,7 @@ code,
 	stroke-width: 1.4;
 }
 
-.copy.is-copied {
+.copy-button.is-copied {
 	color: var(--ok);
 	border-color: color-mix(in srgb, var(--ok) 40%, transparent);
 }
