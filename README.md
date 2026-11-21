@@ -27,7 +27,8 @@ file_limit = 200       # the most files a Spotlight search shows
 | ⌘Space | Show or hide the panel |
 | Type | Fuzzy-search the apps in `/Applications`, `/System/Applications` and `~/Applications` (Utilities and other subfolders included) |
 | Space on an empty query | Search files with Spotlight (by file and display name) |
-| ⌫ on an empty query | Leave file search |
+| `in` then Space | Search inside files with Spotlight (words in the indexed text, by prefix), as Alfred's `in` |
+| ⌫ on an empty query | Leave file or content search |
 | ↑ ↓ | Move the selection |
 | ↩ | Open the app or file |
 | ⌘↩ | Reveal the file in Finder |
@@ -50,18 +51,22 @@ For development, `direnv allow` (or `nix develop`) gives a shell with cargo, cli
 cargo run -p dupin
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
-cargo run -p dupin-mac --example search -- files invoice   # a provider from the terminal
+cargo run -p dupin-mac --example search -- in invoice      # a provider from the terminal (apps, files, in)
 scripts/snap.sh                        # headless renders of scripts/headless/*.json into target/screenshots
 ```
 
 Debug builds take Rune's headless flags (`--snap`, `--tree`, `--script`, `--realtime`, ...); see Rune's `crates/rune/README.md`, "Agent tooling".
+
+## Releases
+
+[tagpr](https://github.com/Songmu/tagpr) keeps a release pull request open against `main`. It bumps `VERSION`; merging it tags the merge commit and creates the GitHub release. The crates stay at version 0.0.0, so a release changes neither `Cargo.lock` nor the vendored-dependency hash in `flake.nix`.
 
 ## Layout
 
 | Crate | What it holds |
 | --- | --- |
 | `crates/dupin-core` | No UI, no macOS: the `Provider` trait and `Item` model, the newest-wins `Searcher`, fuzzy matching, the launcher `Session` (modes, selection, effects) and `config.toml` |
-| `crates/dupin-mac` | The apps and Spotlight providers and NSWorkspace actions, through objc2 |
+| `crates/dupin-mac` | The apps and Spotlight (names and contents) providers and NSWorkspace actions, through objc2 |
 | `crates/dupin` | The Rune app: the panel view, key mapping and hotkey; kept thin so the UI framework can change without touching the rest |
 
 Every source of results is a `Provider` that streams batches of `Item`s on its own worker thread. Apps and files use it today; extensions (scripts that print a JSON view to stdout) are meant to use it too.
