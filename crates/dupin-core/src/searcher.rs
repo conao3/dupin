@@ -1,0 +1,170 @@
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::thread;
+
+use crate::{Item, Provider, Request};
+
+/// What a [`Searcher`] hands back: a batch of new results for one generation, or the end of it.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Delivery {
+    Batch { generation: u64, items: Vec<Item> },
+    Done { generation: u64 },
+}
+
+impl Delivery {
+    pub fn generation(&self) -> u64 {
+        match self {
+            Delivery::Batch { generation, .. } | Delivery::Done { generation } => *generation,
+        }
+    }
+}
+
+struct Job {
+    query: String,
+    limit: usize,
+    generation: u64,
+}
+
+/// Runs one provider on its own long-lived thread, newest request wins.
+///
+/// A request supersedes every earlier one: queued ones never start, and a running one sees
+/// `Request::is_cancelled` and its later batches are dropped here before they reach `deliver`.
+/// `deliver` runs on the worker thread; hand its value to the UI thread from there.
+pub struct Searcher {
+    jobs: Sender<Job>,
+    current: Arc<AtomicU64>,
+}
+
+/// Generation 0 means "nothing current": `cancel` stores it and requests start at 1.
+const NONE: u64 = 0;
+
+impl Searcher {
+    pub fn spawn(
+        name: &str,
+        provider: Arc<dyn Provider>,
+        deliver: impl Fn(Delivery) + Send + 'static,
+    ) -> Searcher {
+        let (jobs, rx) = mpsc::channel();
+        let current = Arc::new(AtomicU64::new(NONE));
+        let worker_current = current.clone();
+        thread::Builder::new()
+            .name(format!("dupin-{name}"))
+            .spawn(move || run(rx, &*provider, &worker_current, &deliver))
+            .expect("spawn search worker");
+        Searcher { jobs, current }
+    }
+
+    /// Start a search for `generation` (above 0), superseding any other.
+    pub fn search(&self, generation: u64, query: String, limit: usize) {
+        debug_assert_ne!(generation, NONE);
+        self.current.store(generation, Ordering::Release);
+        let _ = self.jobs.send(Job {
+            query,
+            limit,
+            generation,
+        });
+    }
+
+    /// Stop the running search and drop queued ones.
+    pub fn cancel(&self) {
+        self.current.store(NONE, Ordering::Release);
+    }
+}
+
+fn run(rx: Receiver<Job>, provider: &dyn Provider, current: &Arc<AtomicU64>, deliver: &dyn Fn(Delivery)) {
+    while let Ok(mut job) = rx.recv() {
+        // Requests that piled up while the last search ran: only the newest matters.
+        while let Ok(newer) = rx.try_recv() {
+            job = newer;
+        }
+        let is_current = |g: u64| current.load(Ordering::Acquire) == g;
+        if !is_current(job.generation) {
+            continue;
+        }
+        let request = Request::new(job.query, job.limit, job.generation, current.clone());
+        let generation = job.generation;
+        provider.search(&request, &mut |items| {
+            if !items.is_empty() && is_current(generation) {
+                deliver(Delivery::Batch { generation, items });
+            }
+        });
+        if is_current(generation) {
+            deliver(Delivery::Done { generation });
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ItemKind;
+    use std::path::PathBuf;
+    use std::sync::Mutex;
+    use std::sync::mpsc::RecvTimeoutError;
+    use std::time::Duration;
+
+    struct Echo {
+        gate: Mutex<Option<Receiver<()>>>,
+    }
+
+    impl Provider for Echo {
+        fn search(&self, request: &Request, emit: &mut dyn FnMut(Vec<Item>)) {
+            if request.query == "slow"
+                && let Some(gate) = self.gate.lock().unwrap().take()
+            {
+                let _ = gate.recv();
+            }
+            let path = PathBuf::from(format!("/{}", request.query));
+            emit(vec![Item::path(
+                ItemKind::File,
+                path,
+                request.query.clone(),
+                vec![],
+            )]);
+        }
+    }
+
+    #[test]
+    fn a_newer_search_drops_the_running_ones_results() {
+        let (open_gate, gate) = mpsc::channel();
+        let (tx, rx) = mpsc::channel();
+        let provider = Arc::new(Echo {
+            gate: Mutex::new(Some(gate)),
+        });
+        let searcher = Searcher::spawn("test", provider, move |d| tx.send(d).unwrap());
+        searcher.search(1, "slow".into(), 10);
+        searcher.search(2, "fast".into(), 10);
+        open_gate.send(()).unwrap();
+        let mut got = Vec::new();
+        loop {
+            match rx.recv_timeout(Duration::from_secs(5)) {
+                Ok(d) => {
+                    let done = matches!(d, Delivery::Done { generation: 2 });
+                    got.push(d);
+                    if done {
+                        break;
+                    }
+                }
+                Err(RecvTimeoutError::Timeout) => panic!("no answer"),
+                Err(e) => panic!("{e}"),
+            }
+        }
+        assert!(got.iter().all(|d| d.generation() == 2), "{got:?}");
+        assert!(matches!(&got[0], Delivery::Batch { items, .. } if items[0].title == "fast"));
+    }
+
+    #[test]
+    fn cancel_silences_the_running_search() {
+        let (open_gate, gate) = mpsc::channel();
+        let (tx, rx) = mpsc::channel();
+        let provider = Arc::new(Echo {
+            gate: Mutex::new(Some(gate)),
+        });
+        let searcher = Searcher::spawn("test", provider, move |d| tx.send(d).unwrap());
+        searcher.search(1, "slow".into(), 10);
+        searcher.cancel();
+        open_gate.send(()).unwrap();
+        assert!(rx.recv_timeout(Duration::from_millis(200)).is_err());
+    }
+}

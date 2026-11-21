@@ -1,0 +1,42 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+publish = false
+
+[workspace.dependencies]
+dupin-core = { path = "crates/dupin-core" }
+dupin-mac = { path = "crates/dupin-mac" }
+
+# Rune is pre-release: pin a `dev` rev (`dev` is never rewritten) and patch every crate
+# Rune's own workspace patches, at the same rev. Cargo doesn't inherit a dependency's patches.
+rune = { git = "https://github.com/anomalyco/rune", rev = "86b903de7fef9c6b683e05dc23440de4ebbc4347" }
+rune-notify = { git = "https://github.com/anomalyco/rune", rev = "86b903de7fef9c6b683e05dc23440de4ebbc4347" }
+
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false }
+objc2-app-kit = { version = "0.3", default-features = false }
+serde = { version = "1", features = ["derive"] }
+toml = { version = "0.9", default-features = false, features = ["parse", "serde"] }
+
+[patch.crates-io]
+winit = { git = "https://github.com/anomalyco/rune", rev = "86b903de7fef9c6b683e05dc23440de4ebbc4347" }
+sctk-adwaita = { git = "https://github.com/anomalyco/rune", rev = "86b903de7fef9c6b683e05dc23440de4ebbc4347" }
+parley_engine = { git = "https://github.com/anomalyco/rune", rev = "86b903de7fef9c6b683e05dc23440de4ebbc4347" }
+wgpu-hal = { git = "https://github.com/anomalyco/rune", rev = "86b903de7fef9c6b683e05dc23440de4ebbc4347" }
+accesskit_windows = { git = "https://github.com/anomalyco/rune", rev = "86b903de7fef9c6b683e05dc23440de4ebbc4347" }
+accesskit_macos = { git = "https://github.com/anomalyco/rune", rev = "86b903de7fef9c6b683e05dc23440de4ebbc4347" }
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+
+[profile.release]
+lto = "thin"
+codegen-units = 4
