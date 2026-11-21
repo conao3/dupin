@@ -10,12 +10,14 @@ for (const button of document.querySelectorAll('[data-copy]')) {
 		try {
 			await navigator.clipboard.writeText(button.dataset.copy);
 		} catch {
+			clearTimeout(timer);
+			button.classList.remove('is-copied');
 			if (status) status.textContent = 'Could not copy. Select the command to copy it instead.';
 			return;
 		}
+		clearTimeout(timer);
 		if (status) status.textContent = 'Copied the install command.';
 		button.classList.add('is-copied');
-		clearTimeout(timer);
 		timer = setTimeout(() => {
 			button.classList.remove('is-copied');
 			if (status) status.textContent = '';
