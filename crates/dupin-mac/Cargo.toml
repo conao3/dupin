@@ -1,0 +1,28 @@
+[package]
+name = "dupin-mac"
+description = "macOS providers and actions for Dupin: installed apps, Spotlight file search, NSWorkspace."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+dupin-core = { workspace = true }
+objc2 = { workspace = true }
+objc2-foundation = { workspace = true, features = [
+    "std",
+    "NSArray",
+    "NSDate",
+    "NSMetadata",
+    "NSMetadataAttributes",
+    "NSObjCRuntime",
+    "NSObject",
+    "NSPredicate",
+    "NSRunLoop",
+    "NSString",
+    "NSURL",
+] }
+objc2-app-kit = { workspace = true, features = ["std", "NSWorkspace"] }
+
+[lints]
+workspace = true
