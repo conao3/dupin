@@ -1,5 +1,5 @@
 use dupin_plugin_protocol::{
-    ErrorCode, Outcome, PluginItem, ProtocolError, Request, Response, VERSION, View,
+    ErrorCode, Operation, Outcome, PluginAction, PluginItem, ProtocolError, Request, Response, VERSION, View,
 };
 #[cfg(target_arch = "wasm32")]
 use dupin_plugin_protocol::{MAX_REQUEST_BYTES, MAX_RESPONSE_BYTES};
@@ -162,10 +162,14 @@ fn handle_with(bytes: &[u8], evaluate: impl FnOnce(&str) -> String) -> Result<Ve
                     id: "answer".into(),
                     view: View::Pair {
                         source: request.query.clone(),
-                        result,
+                        result: result.clone(),
                     },
-                    primary: None,
-                    actions: Vec::new(),
+                    primary: Some("copy-result".into()),
+                    actions: vec![PluginAction {
+                        id: "copy-result".into(),
+                        title: "Copy result".into(),
+                        operation: Operation::CopyText { text: result },
+                    }],
                 }],
                 state: None,
             }
@@ -270,7 +274,7 @@ mod tests {
             "(2+3))",
             "2+",
             "1/0",
-            "square metre",
+            "square foot",
             "\"123\"",
             "\"unfinished",
             "2+2\n",
@@ -311,6 +315,11 @@ mod tests {
                 source: request.query,
                 result: "1830".into()
             }
+        );
+        assert_eq!(items[0].primary.as_deref(), Some("copy-result"));
+        assert_eq!(
+            items[0].actions[0].operation,
+            Operation::CopyText { text: "1830".into() }
         );
     }
 

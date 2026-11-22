@@ -33,8 +33,9 @@ is `copy_text`, with a non-empty bounded `text` value. No executable code, nativ
 UI objects or arbitrary OS operations are accepted. The host must check the
 plugin's declared and granted clipboard-write capability at invocation time;
 displaying the action or pressing Enter does not create a grant. Protocol
-validation alone never executes an operation. The fixture still emits no actions
-until broker and launcher integration are connected.
+validation alone never executes an operation. The calculator declares a primary
+copy action; the fixture CLI prints that data without dispatching it. Broker and
+launcher integration remain required.
 
 Version 2 replaces version 1's label-only action descriptors; old wire messages
 are rejected explicitly. The private memory ABI remains version 1.
