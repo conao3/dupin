@@ -164,6 +164,8 @@ pub struct Prefs {
     read_only: bool,
     settings: Arc<crate::settings::Service>,
     config_problem: Option<String>,
+    login_status: Option<dupin_mac::login_item::Status>,
+    login_error: Option<String>,
 }
 
 impl Prefs {
@@ -191,6 +193,31 @@ impl Prefs {
             read_only: crate::settings::read_only(),
             settings,
             config_problem: None,
+            login_status: None,
+            login_error: None,
+        }
+    }
+
+    pub fn refresh_login_item(&mut self) {
+        if let Some(mtm) = objc2::MainThreadMarker::new() {
+            self.login_status = Some(dupin_mac::login_item::status(mtm));
+            self.login_error = None;
+        }
+    }
+
+    fn change_login_item(&mut self) {
+        let Some(mtm) = objc2::MainThreadMarker::new() else {
+            return;
+        };
+        // Re-read before selecting the action in case System Settings changed since focus.
+        let expected = self.login_status.as_ref().and_then(|status| status.action());
+        let status = dupin_mac::login_item::status(mtm);
+        if let Some(action) = status.action().filter(|action| Some(*action) == expected) {
+            let (status, error) = dupin_mac::login_item::perform(action, mtm);
+            self.login_status = Some(status);
+            self.login_error = error;
+        } else {
+            self.login_status = Some(status);
         }
     }
 
@@ -641,7 +668,27 @@ fn general(s: &Prefs, k: &Kit) -> Vec<El> {
     let relaunch = value_button(k, "relaunch", "Relaunch", &icons::REFRESH).on_press(|s: &mut Prefs| {
         s.panel.update(|ui, tx| ui.relaunch(tx));
     });
+    let login_action = s.login_status.as_ref().and_then(|status| status.action());
+    let login_control = Button::new(login_action.map_or("Unavailable", |action| action.label()))
+        .disabled(login_action.is_none())
+        .on_press(Prefs::change_login_item)
+        .build(k);
+    let login_detail = s
+        .login_status
+        .as_ref()
+        .map_or("Status unavailable", |status| status.text());
+    let login_detail = match &s.login_error {
+        Some(error) => format!("{login_detail}. {error}"),
+        None => login_detail.to_owned(),
+    };
     vec![
+        setting(
+            k,
+            &icons::REFRESH,
+            "Launch at login",
+            Some(&login_detail),
+            login_control,
+        ),
         setting(
             k,
             &icons::KEYBOARD,

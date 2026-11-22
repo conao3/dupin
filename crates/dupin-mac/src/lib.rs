@@ -7,6 +7,7 @@ mod bundle_names;
 pub mod dictionary;
 pub mod font;
 pub mod input_source;
+pub mod login_item;
 pub mod spotlight;
 pub mod watcher;
 pub mod window;
