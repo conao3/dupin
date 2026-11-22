@@ -229,7 +229,7 @@ mod tests {
     fn identity_and_command_collisions() {
         let m = decode(&value()).unwrap();
         assert!(validate_catalog(&[m.clone(), m.clone()], &[]).is_err());
-        assert!(validate_catalog(&[m.clone()], &["calculator.evaluate"]).is_err());
+        assert!(validate_catalog(std::slice::from_ref(&m), &["calculator.evaluate"]).is_err());
         let mut v = value();
         v["id"] = "other".into();
         assert!(validate_catalog(&[m, decode(&v).unwrap()], &[]).is_err());

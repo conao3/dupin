@@ -26,10 +26,10 @@ impl PreparedOperation {
         plugin: &PluginHandle,
         operation: Operation,
     ) -> Result<Self, PrepareError> {
-        if let Operation::CopyText { text } = &operation {
-            if text.is_empty() || text.len() > MAX_COPY_BYTES {
-                return Err(PrepareError::InvalidOperation);
-            }
+        if let Operation::CopyText { text } = &operation
+            && (text.is_empty() || text.len() > MAX_COPY_BYTES)
+        {
+            return Err(PrepareError::InvalidOperation);
         }
         let capability = dupin_plugin_protocol::manifest::ActionKind::of(&operation).capability();
         match policy.access(plugin, capability) {
