@@ -213,6 +213,7 @@ fn rank(apps: &[App], query: &str, limit: usize) -> Vec<Item> {
             }
             Item {
                 score: Some(score),
+                completion: None,
                 ..item
             }
         })

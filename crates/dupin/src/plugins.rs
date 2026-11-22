@@ -48,7 +48,6 @@ pub struct Descriptor {
     pub capabilities: &'static [CapabilityDescriptor],
     pub query_eligibility: QueryEligibility,
     pub limit: usize,
-    pub pinned: bool,
     backend: Backend,
 }
 
@@ -65,7 +64,6 @@ pub fn descriptors() -> &'static [Descriptor] {
             default_enabled: true,
             query_eligibility: QueryEligibility::NonEmpty,
             limit: 1,
-            pinned: true,
             backend: Backend::Guest(Guest {
                 command: "calculator",
                 module: "calculator.wasm",
@@ -85,7 +83,6 @@ pub fn descriptors() -> &'static [Descriptor] {
             default_enabled: true,
             query_eligibility: QueryEligibility::EmptyOnly,
             limit: 10,
-            pinned: false,
             backend: Backend::Recent,
             capabilities: &[CapabilityDescriptor {
                 id: "clipboard-write",
@@ -379,6 +376,7 @@ impl Provider for GuestProvider {
                             )
                         })
                         .collect(),
+                    completion: None,
                     record_usage: false,
                     icon: None,
                     matched: Vec::new(),
