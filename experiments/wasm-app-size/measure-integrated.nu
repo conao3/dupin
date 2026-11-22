@@ -70,7 +70,7 @@ def nix-output [flake: string, attribute: string, link: path]: nothing -> string
     )
 }
 
-def main [--prepare-only]: nothing -> record {
+def main [--prepare-only]: nothing -> nothing {
     let root = $env.FILE_PWD | path dirname | path dirname | path expand --strict
     let script = $env.FILE_PWD | path join measure-integrated.nu
     let system = checked nix eval --impure --raw --expr builtins.currentSystem
@@ -128,7 +128,8 @@ def main [--prepare-only]: nothing -> record {
         currency_guest: 'Offline currency fixture included only to measure a second realistic guest; it is not registered or shipped as a product feature.'
     }
     if $prepare_only {
-        return {work: $work, metadata: $metadata, prepared: true}
+        print ({work: $work, metadata: $metadata, prepared: true} | to json)
+        return
     }
 
     let native_out = nix-output $flake 'dupin-no-wasm' ($roots | path join native-only)
@@ -196,5 +197,5 @@ def main [--prepare-only]: nothing -> record {
         ]
     }
     $result | to json | save --force ($work | path join results.json)
-    {work: $work, result: $result}
+    print ({work: $work, result: $result} | to json)
 }
