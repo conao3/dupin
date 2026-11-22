@@ -17,6 +17,7 @@ on:
       - 'nix/cargo-artifacts.nix'
       - 'nix/wasm-plugin.nix'
       - 'nix/calculator-plugin.nix'
+      - 'nix/maps-plugin.nix'
       - 'scripts/unlink-store.nu'
 
 permissions:

@@ -57,6 +57,12 @@ Web searches are local URL templates: typing never sends a request to the engine
 
 Set `web_searches` and optional `web_fallbacks` in [configuration](./configuration.md). Fallback searches appear only after ordinary providers finish without results. They are disabled by default. File and Dictionary modes keep their own providers.
 
+## Maps
+
+Enable **Maps/Places** in Settings → Plugins, then type `maps` or `map` and Space followed by an address or place. Grant **Search in Maps** separately before Enter can open that search in Maps. Without the grant, the query stays in the picker with an explanation.
+
+Searches are handed to Maps when activated. Dupin does not fetch live suggestions or your location while you type. This plugin requires the Wasm-enabled build.
+
 ## Files
 
 Space on an empty query switches to file search; a "Files" chip shows the mode. Every word of the query must appear in the file name or display name. Results appear as Spotlight finds them, then improve as more candidates arrive. Ranking combines filename match quality, your usage and previous query choices, last-used and modified dates, and path depth. Cache and build directories are demoted by the configurable [file ranking rules](./configuration.md#file-ranking).

@@ -1,0 +1,6 @@
+{
+	"events": [
+		{ "t": 0.1, "type": "type", "text": "maps London & 東京" },
+		{ "t": 2.0, "type": "mark", "name": "end" }
+	]
+}

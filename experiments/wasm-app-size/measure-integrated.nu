@@ -33,15 +33,16 @@ def package [
     let plugin_dir = $app | path join Contents Resources plugins
     checked /usr/bin/ditto $source $app | ignore
     checked chmod -R u+w $app | ignore
-    if $plugins.kind == 'none' {
-        rm --recursive --force $plugin_dir
-    } else if $plugins.kind == 'minimal' {
-        rm --recursive --force $plugin_dir
+    rm --recursive --force $plugin_dir
+    if $plugins.kind == 'minimal' {
         mkdir $plugin_dir
         cp ($plugins.module | into string) ($plugin_dir | path join minimal.wasm)
-    } else if $plugins.kind == 'calculator+currency' {
-        let currency = $plugins.currency | into string
-        cp $currency ($plugin_dir | path join currency-fixture.wasm)
+    } else if $plugins.kind in ['calculator' 'calculator+currency'] {
+        mkdir $plugin_dir
+        cp ($plugins.calculator | into string) ($plugin_dir | path join calculator.wasm)
+        if $plugins.kind == 'calculator+currency' {
+            cp ($plugins.currency | into string) ($plugin_dir | path join currency-fixture.wasm)
+        }
     }
     let executable = $app | path join Contents MacOS dupin
     unlink-store $executable
@@ -124,7 +125,7 @@ def main [--prepare-only]: nothing -> nothing {
         script_sha256: (open --raw $script | hash sha256)
         unlink_store_sha256: (open --raw ($root | path join scripts unlink-store.nu) | hash sha256)
         limits: 'Footprint only. No app launch, query latency, cancellation latency, peak memory, idle cost, or runtime adoption is measured.'
-        minimum_guest: 'Minimal ABI-v1 guest returning protocol-v2 empty results. The fixed reply correlates only with request_id=minimal-probe-1 and generation=1. The footprint script does not execute it.'
+        minimum_guest: 'Minimal ABI-v1 guest returning empty results. The fixed reply correlates only with request_id=minimal-probe-1 and generation=1. The footprint script does not execute it.'
         currency_guest: 'Offline currency fixture included only to measure a second realistic guest; it is not registered or shipped as a product feature.'
     }
     if $prepare_only {
@@ -164,12 +165,16 @@ def main [--prepare-only]: nothing -> nothing {
         {
             label: runtime-calculator
             source: $integrated_app
-            plugins: {kind: calculator}
+            plugins: {kind: calculator, calculator: $calculator}
         }
         {
             label: runtime-calculator-currency
             source: $integrated_app
-            plugins: {kind: 'calculator+currency', currency: $currency}
+            plugins: {
+                kind: 'calculator+currency'
+                calculator: $calculator
+                currency: $currency
+            }
         }
     ] | each {|variant| package $variant.label $variant.source $artifacts $variant.plugins }
     let result = {
