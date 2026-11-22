@@ -29,8 +29,6 @@ Choose **Relaunch** in Settings → General to restart Dupin. File edits reload 
 
 Settings → General shows macOS's current login item status. Choose **Enable** or **Disable** to change it explicitly. If approval is required, choose **Open System Settings** and allow Dupin there. Returning to Settings refreshes the status. This requires macOS 13 or later and a signed app bundle; command-line development builds may report an unavailable item or registration error. This setting is independent of `config.toml`, including when that file is read-only. Dupin never registers itself at launch or on configuration reload.
 
-The onboarding offer remains pending issue #13; issue #27 is not fully complete until that integration exists.
-
 ## Web searches
 
 The default keywords are `g` (Google), `gh` (GitHub) and `yt` (YouTube). Define `web_searches` to replace that set, or set it to `{}` to disable web searches. Each entry has a display name and an HTTP or HTTPS URL template with exactly one `{query}` in its path, query or fragment. Dupin encodes the text as UTF-8 URL data; it does not treat typed characters as URL syntax. Templates cannot contain credentials or put the placeholder in the origin.

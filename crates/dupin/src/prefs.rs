@@ -218,6 +218,7 @@ impl Prefs {
             self.login_error = error;
         } else {
             self.login_status = Some(status);
+            self.login_error = None;
         }
     }
 

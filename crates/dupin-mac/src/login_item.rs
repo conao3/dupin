@@ -31,10 +31,10 @@ impl Status {
 
     pub fn action(&self) -> Option<Action> {
         match self {
-            Self::NotRegistered => Some(Action::Register),
+            Self::NotRegistered | Self::NotFound => Some(Action::Register),
             Self::Enabled => Some(Action::Unregister),
             Self::RequiresApproval => Some(Action::OpenSettings),
-            Self::NotFound | Self::Error(_) => None,
+            Self::Error(_) => None,
         }
     }
 
@@ -43,7 +43,7 @@ impl Status {
             Self::NotRegistered => "Off",
             Self::Enabled => "On",
             Self::RequiresApproval => "Requires approval in System Settings",
-            Self::NotFound => "Login item not found. Use an installed, signed Dupin app.",
+            Self::NotFound => "Login item not found",
             Self::Error(error) => error,
         }
     }
@@ -86,7 +86,6 @@ pub fn perform(action: Action, mtm: MainThreadMarker) -> (Status, Option<String>
     perform_with(
         action,
         |action| {
-            let service = service()?;
             if action == Action::OpenSettings {
                 let class = AnyClass::get(c"SMAppService").ok_or("Login items unavailable")?;
                 unsafe {
@@ -94,6 +93,7 @@ pub fn perform(action: Action, mtm: MainThreadMarker) -> (Status, Option<String>
                 }
                 return Ok(());
             }
+            let service = service()?;
             let mut error: *mut AnyObject = std::ptr::null_mut();
             let success: Bool = unsafe {
                 match action {
@@ -133,7 +133,7 @@ mod tests {
             (0, Status::NotRegistered, Some(Action::Register)),
             (1, Status::Enabled, Some(Action::Unregister)),
             (2, Status::RequiresApproval, Some(Action::OpenSettings)),
-            (3, Status::NotFound, None),
+            (3, Status::NotFound, Some(Action::Register)),
         ] {
             let status = Status::from_raw(raw);
             assert_eq!(status, expected);
