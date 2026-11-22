@@ -30,6 +30,7 @@ pub const HEADER_HEIGHT: f32 = view::HEADER_H;
 const FAMILIES: (&str, &str) = ("System Font", "ui-monospace");
 
 fn main() {
+    let startup_started = std::time::Instant::now();
     rune::prewarm_gpu();
     let (config, config_problem) = settings::load();
     let history = store::load();
@@ -122,6 +123,7 @@ fn main() {
             appear_instantly(window);
             // Once per process: a launcher window is made once and kept, but be explicit.
             if !std::mem::replace(&mut registered, true) {
+                trace::ready(startup_started.elapsed());
                 binding.register_at_launch(&hotkey);
                 settings.activate();
             }
