@@ -1,0 +1,9 @@
+{
+	"version": 1,
+	"request_id": "temperature-1",
+	"generation": "1",
+	"command": "calculator",
+	"query": "100 f in c",
+	"limit": 1,
+	"state": null
+}

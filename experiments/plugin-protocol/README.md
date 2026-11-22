@@ -10,11 +10,11 @@ library. Nix's temporary linker shell supplies `lld` without a global install:
 
 ```sh
 nix shell --inputs-from . nixpkgs#lld --command cargo build \
-  --manifest-path experiments/plugin-protocol/Cargo.toml --locked --release \
-  -p dupin-protocol-calculator --lib --target wasm32-unknown-unknown
+  --manifest-path plugins/calculator/Cargo.toml --locked --release \
+  -p dupin-calculator --lib --target wasm32-unknown-unknown
 cargo run --manifest-path experiments/plugin-protocol/Cargo.toml --locked \
   -p dupin-protocol-host -- \
-  experiments/plugin-protocol/target/wasm32-unknown-unknown/release/dupin_protocol_calculator.wasm \
+  plugins/calculator/target/wasm32-unknown-unknown/release/dupin_calculator.wasm \
   experiments/plugin-protocol/requests/compound.json
 ```
 
@@ -23,10 +23,11 @@ arithmetic and a zero-limit pathological expression. The latter must return
 an empty result without evaluating it. There are no clipboard, URL, network,
 file-search or calendar operations in this fixture.
 The calculator is stateless and rejects supplied saved state explicitly.
-It uses fend's search preview; when that preview is empty, the response contains
-no items rather than an error. Final calculator evaluation policy belongs to #17.
+The evaluator lives in the independently buildable [calculator plugin](../../plugins/calculator/README.md).
+This workspace contains only the fixture host. Enter-copy remains parent integration work.
 
 ```sh
+cargo test --manifest-path plugins/calculator/Cargo.toml --locked
 cargo test -p dupin-plugin-protocol
 cargo test --manifest-path experiments/plugin-protocol/Cargo.toml --locked --workspace
 cargo test --manifest-path experiments/plugin-protocol/Cargo.toml --locked \

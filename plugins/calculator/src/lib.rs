@@ -1,13 +1,9 @@
-use std::sync::OnceLock;
-
 use dupin_plugin_protocol::{
     ErrorCode, Outcome, PluginItem, ProtocolError, Request, Response, VERSION, View,
 };
 #[cfg(target_arch = "wasm32")]
 use dupin_plugin_protocol::{MAX_REQUEST_BYTES, MAX_RESPONSE_BYTES};
-use fend_core::{Context, Interrupt};
-
-static CONTEXT: OnceLock<Context> = OnceLock::new();
+use fend_core::{Context, Interrupt, SpanKind};
 
 struct HostFuel;
 
@@ -19,11 +15,121 @@ impl Interrupt for HostFuel {
 }
 
 pub fn handle(bytes: &[u8]) -> Result<Vec<u8>, ProtocolError> {
-    handle_with(bytes, |query| {
-        fend_core::evaluate_preview_with_interrupt(query, CONTEXT.get_or_init(Context::new), &HostFuel)
-            .get_main_result()
-            .to_owned()
-    })
+    handle_with(bytes, calculate)
+}
+
+fn calculate(query: &str) -> String {
+    if !complete_input(query) || query.chars().any(char::is_control) {
+        return String::new();
+    }
+    let input = temperature_shorthand(query);
+    let mut context = Context::new();
+    let Ok(result) = fend_core::evaluate_with_interrupt(&input, &mut context, &HostFuel) else {
+        return String::new();
+    };
+    let output = result.get_main_result();
+    let spans: Vec<_> = result.get_main_result_spans().collect();
+    if result.output_is_empty()
+        || output.len() > 16 * 1024
+        || output.trim() == query.trim()
+        || output.chars().any(char::is_control)
+        || !result
+            .get_main_result_spans()
+            .any(|span| span.kind() == SpanKind::Number)
+        || query.trim().parse::<f64>().is_ok()
+        || query.trim().chars().all(|c| c.is_alphabetic() || c == '_')
+        || (query.chars().all(|c| c.is_alphabetic() || c.is_whitespace())
+            && spans.iter().any(|span| span.kind() == SpanKind::Ident)
+            && spans
+                .iter()
+                .filter(|span| span.kind() == SpanKind::Number)
+                .all(|span| span.string() == "1"))
+    {
+        return String::new();
+    }
+    output.to_owned()
+}
+
+// Context aliases would also replace f/c in unrelated unit expressions.
+fn temperature_shorthand(query: &str) -> String {
+    let words: Vec<_> = query.split_whitespace().collect();
+    if let [value, from, connector, to] = words.as_slice()
+        && value.parse::<f64>().is_ok()
+        && matches!(*connector, "in" | "to")
+        && matches!(*from, "f" | "c" | "F" | "C")
+        && matches!(*to, "f" | "c" | "F" | "C")
+    {
+        return format!(
+            "{value} {} {connector} {}",
+            from.to_ascii_uppercase(),
+            to.to_ascii_uppercase()
+        );
+    }
+    query.to_owned()
+}
+
+// Fend accepts missing closing delimiters, which are still unfinished live input.
+fn complete_input(input: &str) -> bool {
+    let mut chars = input.chars().peekable();
+    let mut stack = Vec::new();
+    let mut after_number = false;
+    let mut word = String::new();
+    while let Some(c) = chars.next() {
+        if c == '#' {
+            if matches!(chars.peek(), Some(' ' | '!')) {
+                break;
+            }
+            if chars.peek() == Some(&'"') {
+                chars.next();
+                let mut closed = false;
+                while let Some(c) = chars.next() {
+                    if c == '"' && chars.peek() == Some(&'#') {
+                        chars.next();
+                        closed = true;
+                        break;
+                    }
+                }
+                if !closed {
+                    return false;
+                }
+                after_number = false;
+                continue;
+            }
+        }
+        if matches!(c, '\'' | '"') && !after_number && !matches!(word.as_str(), "to" | "in") {
+            let mut closed = false;
+            while let Some(next) = chars.next() {
+                if next == '\\' {
+                    chars.next();
+                } else if next == c {
+                    closed = true;
+                    break;
+                }
+            }
+            if !closed {
+                return false;
+            }
+            continue;
+        }
+        match c {
+            '(' => stack.push(')'),
+            '[' => stack.push(']'),
+            '{' => stack.push('}'),
+            ')' | ']' | '}' if stack.pop() != Some(c) => return false,
+            _ => {}
+        }
+        if !c.is_whitespace() {
+            after_number = c.is_ascii_digit() || matches!(c, ')' | ']' | '}' | '\'' | '"');
+            if c.is_alphabetic() {
+                word.push(c);
+            } else {
+                word.clear();
+            }
+        } else if chars.peek().is_some_and(|next| next.is_alphabetic()) {
+            word.clear();
+        }
+    }
+    stack.is_empty()
 }
 
 fn handle_with(bytes: &[u8], evaluate: impl FnOnce(&str) -> String) -> Result<Vec<u8>, ProtocolError> {
@@ -123,6 +229,62 @@ pub unsafe extern "C" fn dupin_query(input: i32, len: i32, output: i32, cap: i32
 mod tests {
     use super::*;
 
+    #[test]
+    fn numeric_acceptance() {
+        for (query, expected) in [
+            ("12*3", "36"),
+            ("2^10", "1024"),
+            ("(1+2)/3", "1"),
+            ("20% of 150", "30"),
+            ("560km to mi", "approx. 347.9678676529 mi"),
+            ("100 f in c", "approx. 37.7777777778 °C"),
+            ("100 F in C", "approx. 37.7777777778 °C"),
+            ("1GiB in MB", "1073.741824 MB"),
+            ("2m^2 in cm^2", "20000 cm^2"),
+            ("30*(60+1)km/h in m/s", "approx. 508.3333333333 m / s"),
+            ("sin pi", "0"),
+            (
+                "2^200",
+                "1606938044258990275541962092341162602522202993782792835301376",
+            ),
+        ] {
+            assert_eq!(calculate(query), expected, "{query}");
+        }
+    }
+
+    #[test]
+    fn scoped_temperature_and_context_isolation() {
+        assert_eq!(calculate("1 f"), "1 F");
+        assert_eq!(calculate("1 c"), "299792458 m / s");
+        assert_eq!(temperature_shorthand("100 f * c"), "100 f * c");
+        assert_eq!(temperature_shorthand("100 f in cm"), "100 f in cm");
+        assert_eq!(calculate("x = 5; x+1"), "6");
+        assert!(calculate("x+1").is_empty());
+        assert_eq!(calculate("12*3"), "36");
+    }
+
+    #[test]
+    fn incomplete_and_non_numeric_results_are_empty() {
+        for query in [
+            "30*(60+1",
+            "(2+3))",
+            "2+",
+            "1/0",
+            "square metre",
+            "\"123\"",
+            "\"unfinished",
+            "2+2\n",
+            "roll d6",
+        ] {
+            assert!(calculate(query).is_empty(), "{query}");
+        }
+        for query in ["\"(\"", "'('", "#\"(\"#", "1 # (", "5' in m"] {
+            assert!(complete_input(query), "{query}");
+        }
+        assert!(complete_input("1m to '"));
+        assert!(calculate("2^60000").is_empty());
+    }
+
     fn request(query: &str) -> Request {
         Request {
             version: VERSION,
@@ -196,7 +358,7 @@ mod tests {
 
     #[test]
     fn uninteresting_previews_do_not_become_errors() {
-        for query in ["42", "not-maths", "2^200"] {
+        for query in ["42", "not-maths", "30*(60+1", "sin", "km", "roll d6", "hello"] {
             let request = request(query);
             let bytes = handle(&request.encode().unwrap()).unwrap();
             let response = Response::decode(&bytes, &request).unwrap();
