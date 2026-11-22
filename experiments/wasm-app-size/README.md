@@ -125,27 +125,29 @@ additional entitlements, Developer ID signing, notarisation, or stapling.
 
 ### Integrated run, 22 November 2026
 
-[Recorded results](results/2026-11-22-integrated-aarch64-darwin.json) use
-`c4eb6dad773b949b7d7a778965c74e56b04f8ee1`, a clean source snapshot on
-Apple silicon. Sizes are bytes; app totals include regular files after signing.
+[Current recorded results](results/2026-11-22-integrated-cached-aarch64-darwin.json) use
+`3ca4203f08c1885afb4c207be4adbc91eb9a4f0d`, a clean source snapshot after
+the Cargo-cache integration. Sizes are bytes; app totals include regular files
+after signing. The [earlier run](results/2026-11-22-integrated-aarch64-darwin.json)
+remains as a historical record of its own pinned source.
 
 | Variant                                  | Stripped executable | Signed app | Updater ZIP |
 | ---------------------------------------- | ------------------: | ---------: | ----------: |
-| Native only                              |          18,553,696 | 18,588,005 |   9,631,779 |
-| Runtime, no guests                       |          19,845,568 | 19,872,357 |  10,104,971 |
-| Runtime, minimal ABI guest               |          19,845,568 | 19,872,927 |  10,106,579 |
-| Runtime and calculator                   |          19,845,568 | 20,756,300 |  10,411,745 |
-| Runtime, calculator and currency fixture |          19,845,568 | 21,624,356 |  10,714,973 |
+| Native only                              |          18,603,456 | 18,637,477 |   9,683,804 |
+| Runtime, no guests                       |          19,878,816 | 19,905,413 |  10,152,819 |
+| Runtime, minimal ABI guest               |          19,878,816 | 19,905,983 |  10,154,428 |
+| Runtime and calculator                   |          19,878,816 | 20,789,368 |  10,459,601 |
+| Runtime, calculator and currency fixture |          19,878,816 | 21,657,488 |  10,762,846 |
 
-The proposed calculator build adds 2,168,295 app bytes and 779,966 ZIP bytes
+The calculator build adds 2,151,891 app bytes and 775,797 ZIP bytes
 against the same-source native-only build. Adding the second realistic guest
-adds another 868,056 app bytes and 303,228 ZIP bytes. Both guests contain their
-own evaluator and serialization code; the second-guest case counts that
-duplication rather than assuming a shared guest library.
+adds another 868,120 app bytes and 303,245 ZIP bytes. Both guests contain their
+own evaluator and encoding code; the second-guest case counts that duplication
+rather than assuming a shared guest library.
 
 All signed variants passed strict verification with hardened runtime and no
-additional entitlements. Artifact paths in the record are relative to the run
-directory; the app and ZIP files themselves are not committed.
+additional entitlements. The record retains the temporary app paths; the app
+and ZIP files themselves are not committed.
 
 The [current execution probe](../integrated-runtime-probe/README.md) checks these
 exact packaged guests against their native implementations. Package size and

@@ -22,11 +22,14 @@ The optional third path is a minimal ABI-compatible guest that returns a valid e
 
 These measurements cover the runtime and guest query boundary. They do not measure Dupin process startup, the rendered interface, macOS services, actual clipboard writes, or process memory. The currency guest is a test fixture and is not registered as a Dupin feature.
 
-[The recorded Apple silicon run](results/2026-11-22-aarch64-darwin.json) uses
+[The current Apple silicon run](results/2026-11-22-current-aarch64-darwin.json) uses
 the exact three guest artifacts from the
-[integrated package measurement](../wasm-app-size/results/2026-11-22-integrated-aarch64-darwin.json).
+[integrated package measurement](../wasm-app-size/results/2026-11-22-integrated-cached-aarch64-darwin.json).
 Its metadata records their hashes, the probe and evaluator source hashes, the
 toolchain and the source commit. Every native/Wasm response matched, the minimal
 guest returned a valid empty response, and both real-budget fuel exhaustion and
 cancellation during a query passed. These are small fixed-workload samples,
 not application-startup or idle-memory benchmarks.
+
+The [earlier run](results/2026-11-22-aarch64-darwin.json) remains a historical
+record for its pinned source and guest hashes.
