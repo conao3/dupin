@@ -6,6 +6,7 @@ mod commands;
 mod hotkey;
 mod icons;
 mod log;
+mod plugins;
 mod prefs;
 mod settings;
 mod shader;

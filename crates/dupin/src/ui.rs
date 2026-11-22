@@ -40,6 +40,7 @@ pub struct Ui {
     icon_cache: Option<ImageCache>,
     searchers: HashMap<CommandId, Searcher>,
     deadlines: HashMap<CommandId, (u64, f64)>,
+    plugins: crate::plugins::Services,
     _apps_watcher: Option<AppsWatcher>,
     saver: crate::store::Saver,
     position: Position,
@@ -65,7 +66,8 @@ impl Ui {
         notice: Option<String>,
     ) -> Ui {
         let apps_provider = Arc::new(AppsProvider::standard());
-        let registration = crate::commands::register(&config, apps_provider.clone())
+        let plugins = crate::plugins::Services::new(&config);
+        let registration = crate::commands::register(&config, apps_provider.clone(), &plugins)
             .expect("built-in command registration is valid");
         let apps_watcher = apps_provider.watch({
             let me = me.clone();
@@ -120,6 +122,7 @@ impl Ui {
             icon_cache: None,
             searchers,
             deadlines: HashMap::new(),
+            plugins,
             _apps_watcher: apps_watcher,
             position: config.position,
             input_source: config.input_source,
@@ -134,12 +137,15 @@ impl Ui {
 
     /// Settings changed in the settings window. The hotkey is the settings window's to
     /// re-register; the rest takes effect from the next summon.
-    pub fn apply_config(&mut self, config: &Config) {
+    pub fn apply_config(&mut self, config: &Config, tx: &mut Tx) {
+        self.plugins.apply_config(config);
         let registration =
             crate::commands::configured(config).expect("built-in command registration is valid");
-        self.session
+        let effects = self
+            .session
             .set_commands(registration.registry)
             .expect("built-in command registration is valid");
+        self.apply(effects, tx);
         self.registration_notice = registration.notice;
         self.position = config.position;
         self.input_source = config.input_source.clone();
@@ -440,6 +446,30 @@ impl Ui {
                 Effect::ReplaceQuery(text) => self.query.replace_text(text),
                 Effect::SaveHistory => self.saver.save(self.session.history()),
                 Effect::Run(action) => {
+                    if let dupin_core::Action::Plugin { command, operation } = action {
+                        let key = self
+                            .session
+                            .selected_item()
+                            .map(|_| self.session.result_key(self.session.selected()))
+                            .unwrap_or_default();
+                        let result = self.plugins.copy(
+                            &command,
+                            operation,
+                            || {
+                                self.session.selected_item().is_some()
+                                    && self.session.result_key(self.session.selected()) == key
+                            },
+                            |text| tx.copy(text.to_owned()),
+                        );
+                        match result {
+                            Ok(()) => {
+                                let effects = self.session.complete_operation(&key);
+                                self.apply(effects, tx);
+                            }
+                            Err(message) => self.notice = Some(message.into()),
+                        }
+                        continue;
+                    }
                     if let dupin_core::Action::Copy(text) = action {
                         tx.copy(text);
                         continue;

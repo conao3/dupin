@@ -1,6 +1,14 @@
 //! `config.toml`: user settings. Every key is optional; a missing file is the defaults.
 
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct PluginSettings {
+    pub enabled: bool,
+    pub grants: Vec<String>,
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
@@ -12,6 +20,7 @@ pub struct Config {
     pub file_limit: usize,
     /// Keywords followed by Space that enter macOS Dictionary search.
     pub dictionary_keywords: Vec<String>,
+    pub plugins: BTreeMap<String, PluginSettings>,
     /// Where the panel opens on the display under the pointer.
     pub position: Position,
     /// The keyboard input source to type with while the panel shows.
@@ -110,6 +119,7 @@ impl Default for Config {
             hotkey: "cmd+space".into(),
             file_limit: 200,
             dictionary_keywords: vec!["define".into(), "d".into()],
+            plugins: BTreeMap::new(),
             position: Position::Center,
             input_source: InputSource::Ascii,
             auto_update: true,
@@ -162,6 +172,17 @@ mod tests {
         assert_eq!(Config::parse("").unwrap().dictionary_keywords, ["define", "d"]);
         let config = Config::parse("dictionary_keywords = [\"word\", \"lookup\"]").unwrap();
         assert_eq!(config.dictionary_keywords, ["word", "lookup"]);
+    }
+
+    #[test]
+    fn plugin_enablement_and_grants_are_separate_settings() {
+        let config =
+            Config::parse("[plugins.calculator]\nenabled = true\ngrants = [\"clipboard-write\"]").unwrap();
+        assert!(config.plugins["calculator"].enabled);
+        assert_eq!(config.plugins["calculator"].grants, ["clipboard-write"]);
+        let disabled = Config::parse("[plugins.calculator]\ngrants = [\"clipboard-write\"]").unwrap();
+        assert!(!disabled.plugins["calculator"].enabled);
+        assert!(Config::parse("[plugins.calculator]\nunknown = true").is_err());
     }
 
     #[test]

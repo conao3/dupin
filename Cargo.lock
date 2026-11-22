@@ -746,6 +746,10 @@ version = "0.0.0"
 dependencies = [
  "dupin-core",
  "dupin-mac",
+ "dupin-plugin-broker",
+ "dupin-plugin-policy",
+ "dupin-plugin-protocol",
+ "dupin-plugin-runtime",
  "libc",
  "naga",
  "objc2 0.6.5",

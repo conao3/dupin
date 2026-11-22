@@ -108,16 +108,37 @@ pub fn configured(config: &Config) -> Result<ConfiguredCommands, dupin_core::Com
         )
     });
 
+    let mut defaults = vec![id(APPS)];
+    let mut pinned = None;
+    for plugin in crate::plugins::descriptors() {
+        let command = crate::plugins::command_id(plugin);
+        let mut spec = CommandSpec::new(
+            command.clone(),
+            1,
+            presentation(plugin.title, Some(plugin.title), None, None, false, 0.0),
+        );
+        spec.deadline = crate::plugins::DEADLINE;
+        registry.register(spec)?;
+        if crate::plugins::settings(config, plugin).enabled {
+            pinned.get_or_insert_with(|| command.clone());
+            defaults.push(command);
+        }
+    }
+    registry.set_default_providers(defaults, pinned)?;
     Ok(ConfiguredCommands { registry, notice })
 }
 
-pub fn register(config: &Config, apps: Arc<AppsProvider>) -> Result<Registration, dupin_core::CommandError> {
+pub fn register(
+    config: &Config,
+    apps: Arc<AppsProvider>,
+    plugins: &crate::plugins::Services,
+) -> Result<Registration, dupin_core::CommandError> {
     let ConfiguredCommands { registry, notice } = configured(config)?;
     let apps_id = id(APPS);
     let files_id = id(FILES);
     let contents_id = id(CONTENTS);
     let dictionary_id = id(DICTIONARY);
-    let providers: HashMap<_, Arc<dyn Provider>> = [
+    let mut providers: HashMap<_, Arc<dyn Provider>> = [
         (apps_id, apps as Arc<dyn Provider>),
         (
             files_id,
@@ -133,6 +154,7 @@ pub fn register(config: &Config, apps: Arc<AppsProvider>) -> Result<Registration
         ),
     ]
     .into();
+    providers.extend(plugins.providers());
 
     Ok(Registration {
         registry,

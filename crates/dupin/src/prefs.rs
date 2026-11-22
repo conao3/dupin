@@ -56,6 +56,7 @@ fn anchor(key: &str) -> String {
 enum Page {
     General,
     Search,
+    Plugins,
     Appearance,
     Updates,
 }
@@ -63,7 +64,7 @@ enum Page {
 impl Page {
     /// The pages this build has: Updates only where there's an update feed.
     fn all(updates: bool) -> Vec<Page> {
-        let mut pages = vec![Page::General, Page::Search, Page::Appearance];
+        let mut pages = vec![Page::General, Page::Search, Page::Plugins, Page::Appearance];
         if updates {
             pages.push(Page::Updates);
         }
@@ -74,6 +75,7 @@ impl Page {
         match self {
             Page::General => "General",
             Page::Search => "Search",
+            Page::Plugins => "Plugins",
             Page::Appearance => "Appearance",
             Page::Updates => "Updates",
         }
@@ -84,6 +86,7 @@ impl Page {
         match self {
             Page::General => "page-general",
             Page::Search => "page-search",
+            Page::Plugins => "page-plugins",
             Page::Appearance => "page-appearance",
             Page::Updates => "page-updates",
         }
@@ -93,6 +96,7 @@ impl Page {
         match self {
             Page::General => &icons::SLIDERS,
             Page::Search => &icons::SEARCH,
+            Page::Plugins => &icons::SPARKLES,
             Page::Appearance => &icons::SPARKLES,
             Page::Updates => &icons::REFRESH,
         }
@@ -346,7 +350,7 @@ impl Prefs {
     fn save(&self) {
         crate::settings::save(&self.config);
         let config = self.config.clone();
-        self.panel.update(move |ui, _| ui.apply_config(&config));
+        self.panel.update(move |ui, tx| ui.apply_config(&config, tx));
     }
 }
 
@@ -356,6 +360,7 @@ pub fn view(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
     let rows = match s.page {
         Page::General => general(s, k),
         Page::Search => search(s, k),
+        Page::Plugins => plugins(s, k),
         Page::Appearance => appearance(s, k),
         Page::Updates => updates(s, k),
     };
@@ -533,6 +538,59 @@ fn general(s: &Prefs, k: &Kit) -> Vec<El> {
             input_source,
         ),
     ]
+}
+
+fn plugins(s: &Prefs, k: &Kit) -> Vec<El> {
+    let mut rows = Vec::new();
+    for plugin in crate::plugins::descriptors() {
+        let current = crate::plugins::settings(&s.config, plugin);
+        let enabled = Switch::new(current.enabled)
+            .label(plugin.title)
+            .hide_label()
+            .disabled(s.read_only)
+            .on_toggle(move |s: &mut Prefs| {
+                s.set(|config| {
+                    let mut settings = crate::plugins::settings(config, plugin);
+                    settings.enabled = !settings.enabled;
+                    config.plugins.insert(plugin.id.into(), settings);
+                })
+            })
+            .build(k);
+        rows.push(setting(
+            k,
+            &icons::SPARKLES,
+            plugin.title,
+            Some(plugin.description),
+            enabled,
+        ));
+        for capability in plugin.capabilities {
+            let granted = current.grants.iter().any(|id| id == capability.id);
+            let grant = Switch::new(granted)
+                .label(capability.title)
+                .hide_label()
+                .disabled(s.read_only || !current.enabled)
+                .on_toggle(move |s: &mut Prefs| {
+                    s.set(|config| {
+                        let mut settings = crate::plugins::settings(config, plugin);
+                        if settings.grants.iter().any(|id| id == capability.id) {
+                            settings.grants.retain(|id| id != capability.id);
+                        } else {
+                            settings.grants.push(capability.id.into());
+                        }
+                        config.plugins.insert(plugin.id.into(), settings);
+                    })
+                })
+                .build(k);
+            rows.push(setting(
+                k,
+                &icons::SPARKLES,
+                capability.title,
+                Some(capability.description),
+                grant,
+            ));
+        }
+    }
+    rows
 }
 
 fn search(s: &Prefs, k: &Kit) -> Vec<El> {

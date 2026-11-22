@@ -12,6 +12,10 @@ pub enum Action {
     /// Open a URL with its registered handler.
     OpenUrl(String),
     Copy(String),
+    Plugin {
+        command: crate::CommandId,
+        operation: dupin_plugin_protocol::Operation,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

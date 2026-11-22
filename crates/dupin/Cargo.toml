@@ -11,6 +11,10 @@ license.workspace = true
 [dependencies]
 dupin-core = { workspace = true }
 dupin-mac = { workspace = true }
+dupin-plugin-protocol = { workspace = true }
+dupin-plugin-runtime = { path = "../dupin-plugin-runtime" }
+dupin-plugin-policy = { path = "../dupin-plugin-policy" }
+dupin-plugin-broker = { path = "../dupin-plugin-broker" }
 libc = { workspace = true }
 rune = { workspace = true }
 rune-notify = { workspace = true }
