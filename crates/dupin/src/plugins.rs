@@ -193,7 +193,10 @@ impl Services {
                     "Allow this plugin to copy results in Settings → Plugins."
                 }
                 (true, _) => "This action is no longer available.",
-                _ => "Enable this plugin and allow this action in Settings → Plugins.",
+                (false, PrepareError::Access(Access::Disabled | Access::NeedsGrant)) => {
+                    "Enable this plugin and allow this action in Settings → Plugins."
+                }
+                _ => "This action is no longer available.",
             }
         })
     }

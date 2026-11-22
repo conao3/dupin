@@ -43,8 +43,9 @@ copy action. In the launcher, the broker rechecks its grant and current result
 before the host clipboard sink runs. The fixture CLI prints the action data and
 does not dispatch it.
 
-Version 3 replaces version 1's label-only action descriptors; old wire messages
-are rejected explicitly. The private memory ABI remains version 1.
+Version 2 replaced version 1's label-only action descriptors. Version 3 adds typed
+system commands and rejects version 2 wire messages explicitly. The private memory
+ABI remains version 1.
 
 The host checks request/response correlation and result count after decoding.
 Item IDs must be unique within a response; action IDs must be unique within an

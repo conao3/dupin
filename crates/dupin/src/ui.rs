@@ -763,30 +763,35 @@ impl Ui {
                                         |operation| accepted = Some(operation),
                                     );
                                     // The permit is consumed at handoff. Accepted OS operations cannot be undone.
-                                    let result = result
-                                        .map_err(|_| "This action is no longer available.".to_owned())
-                                        .and_then(|()| match accepted {
-                                            Some(dupin_plugin_protocol::Operation::SystemCommand {
-                                                command,
-                                            }) => dupin_mac::system_commands::dispatch(
-                                                command,
-                                                dupin_mac::system_commands::run,
-                                            ),
-                                            _ => Err("Unsupported operation.".into()),
-                                        });
-                                    me.update(move |s, tx| {
-                                        if epoch.load(Ordering::Acquire) == expected
-                                            && s.session.selected_item().is_some()
-                                            && s.session.result_key(s.session.selected()) == key
+                                    let result = match result {
+                                        Err(dupin_plugin_broker::DispatchError::Cancelled) => None,
+                                        result => Some(
+                                            result
+                                                .map_err(|_| "This action is no longer available.".to_owned())
+                                                .and_then(|()| match accepted {
+                                                    Some(
+                                                        dupin_plugin_protocol::Operation::SystemCommand {
+                                                            command,
+                                                        },
+                                                    ) => dupin_mac::system_commands::dispatch(
+                                                        command,
+                                                        dupin_mac::system_commands::run,
+                                                    ),
+                                                    _ => Err("Unsupported operation.".into()),
+                                                }),
+                                        ),
+                                    };
+                                    me.update(move |s, tx| match result {
+                                        Some(Err(error)) => s.show_notice(error, tx),
+                                        Some(Ok(()))
+                                            if epoch.load(Ordering::Acquire) == expected
+                                                && s.session.selected_item().is_some()
+                                                && s.session.result_key(s.session.selected()) == key =>
                                         {
-                                            match result {
-                                                Ok(()) => {
-                                                    let effects = s.session.complete_operation(&key);
-                                                    s.apply(effects, tx);
-                                                }
-                                                Err(error) => s.show_notice(error, tx),
-                                            }
+                                            let effects = s.session.complete_operation(&key);
+                                            s.apply(effects, tx);
                                         }
+                                        _ => {}
                                     });
                                     running.fetch_sub(1, Ordering::AcqRel);
                                 });
