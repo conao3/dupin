@@ -44,6 +44,10 @@ Search for a macOS settings pane, such as `bluetooth`, `displays` or `keyboard`,
 
 Type `dupin settings` to open Dupin's own preferences. This uses the same window handoff as ⌘,.
 
+## System commands
+
+Type `sleep` or `lock` in ordinary search, select Sleep or Lock Screen, and press Enter. Searching never runs a command. Sleep requests full machine sleep. Lock Screen sends the standard Control–Command–Q shortcut and requires existing event-synthesis access; a disabled or intercepted shortcut can prevent locking. Refusals appear in the launcher.
+
 ## Web searches
 
 Type `g rust lifetimes`, `gh dupin` or `yt piano` to search Google, GitHub or YouTube. The search appears as the first result alongside any matching apps; Enter opens it in the default browser. Typing just the keyword shows the search too. Select it and press Tab to add a space before typing the query.
