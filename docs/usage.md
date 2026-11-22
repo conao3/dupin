@@ -46,7 +46,7 @@ Type `dupin settings` to open Dupin's own preferences. This uses the same window
 
 ## System commands
 
-Type `sleep` or `lock` in ordinary search, select Sleep or Lock Screen, and press Enter. Searching never runs a command. Sleep requests full machine sleep. Lock Screen sends the standard Control–Command–Q shortcut and requires existing event-synthesis access; a disabled or intercepted shortcut can prevent locking. Refusals appear in the launcher.
+Type `sleep` or `lock` in ordinary search, select Sleep or Lock Screen Now, and press Enter to review its action. Choose Sleep Now or Lock Screen Now on the action screen to execute it; Escape returns to search. Searching and the first Enter never run a command. Sleep requests full machine sleep. Lock Screen sends the standard Control–Command–Q shortcut and requires existing event-synthesis access; a disabled or intercepted shortcut can instead reach the frontmost app and trigger its action. Refusals appear in the launcher.
 
 ## Web searches
 

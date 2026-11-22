@@ -17,7 +17,7 @@ impl SystemAction {
     fn title(self) -> &'static str {
         match self {
             Self::Sleep => "Sleep",
-            Self::LockScreen => "Lock Screen",
+            Self::LockScreen => "Lock Screen Now",
         }
     }
 }
@@ -29,26 +29,40 @@ impl Provider for SystemProvider {
         if request.limit == 0 || request.query.trim().is_empty() || request.is_cancelled() {
             return Ok(());
         }
+        let query = request.query.trim().to_lowercase();
+        if query.chars().count() < 3 {
+            return Ok(());
+        }
         let mut items: Vec<_> = [SystemAction::Sleep, SystemAction::LockScreen]
             .into_iter()
             .filter_map(|action| {
-                let found = fuzzy::score(request.query.trim(), action.title())?;
+                let terms: &[&str] = match action {
+                    SystemAction::Sleep => &["sleep"],
+                    SystemAction::LockScreen => &["lock", "lock screen"],
+                };
+                if !terms.iter().any(|term| term.starts_with(&query)) {
+                    return None;
+                }
+                let found = fuzzy::score(&query, action.title())?;
                 Some(Item {
                     id: action.id().into(),
                     view: View::Text {
                         title: action.title().into(),
-                        subtitle: "System command · activate to run".into(),
+                        subtitle: "System command · Enter to review action".into(),
                     },
                     record_usage: false,
                     icon: None,
                     matched: found.positions,
                     completion: None,
                     score: Some(found.score),
-                    primary: Some("run".into()),
+                    primary: None,
                     alternate: None,
                     actions: vec![ItemAction::new(
                         "run",
-                        action.title(),
+                        match action {
+                            SystemAction::Sleep => "Sleep Now",
+                            SystemAction::LockScreen => "Lock Screen Now",
+                        },
                         Action::Host(action.id().into()),
                     )],
                 })
@@ -140,6 +154,15 @@ mod tests {
             ("", None),
             ("  ", None),
             ("restart", None),
+            ("see", None),
+            ("screen", None),
+            ("lore", None),
+            ("keen", None),
+            ("loser", None),
+            ("s", None),
+            ("e", None),
+            ("sle", Some(SystemAction::Sleep)),
+            ("LOCK", Some(SystemAction::LockScreen)),
             ("sleep", Some(SystemAction::Sleep)),
             ("lock", Some(SystemAction::LockScreen)),
         ] {
@@ -151,6 +174,7 @@ mod tests {
                 assert_eq!(items.len(), 1);
                 assert_eq!(items[0].action("run"), Some(&Action::Host(action.id().into())));
                 assert!(items[0].completion.is_none());
+                assert!(items[0].primary.is_none());
                 assert!(items[0].alternate.is_none());
                 assert!(!items[0].record_usage);
             } else {

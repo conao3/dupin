@@ -288,7 +288,18 @@ mod tests {
                     .iter()
                     .any(|e| matches!(e, Effect::Run(_)))
             );
-            let activation = session.intent(Intent::Open).unwrap();
+            assert!(session.pending(&id(SETTINGS), generation));
+            let review = session.intent(Intent::Open).unwrap();
+            assert!(
+                review
+                    .iter()
+                    .any(|effect| matches!(effect, Effect::ShowActions { .. }))
+            );
+            assert!(!review.iter().any(|effect| matches!(effect, Effect::Run(_))));
+            assert!(!review.iter().any(|effect| matches!(effect, Effect::Hide)));
+            assert_eq!(session.query(), query);
+            let key = session.result_key(session.selected());
+            let activation = session.run_key_action(&key, "run");
             assert!(
                 activation
                     .iter()
