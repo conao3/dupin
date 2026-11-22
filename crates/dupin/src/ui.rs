@@ -441,6 +441,11 @@ impl Ui {
         self.hide(tx);
     }
 
+    fn prepare_settings(&mut self) {
+        crate::trace::settings("requested");
+        self.settings_after_close = true;
+    }
+
     pub fn closed(&mut self, _: &mut Tx) {
         if std::mem::take(&mut self.settings_after_close) {
             crate::trace::settings("panel closed");
@@ -515,8 +520,7 @@ impl Ui {
                 return true;
             }
             Key::Command(',') => {
-                crate::trace::settings("requested");
-                self.settings_after_close = true;
+                self.prepare_settings();
                 self.dismiss(tx);
                 return true;
             }
@@ -690,34 +694,43 @@ impl Ui {
                     self.saver.save(self.session.history());
                 }
                 Effect::Run(action) => {
-                    if let dupin_core::Action::Plugin { command, operation } = action {
-                        let key = self
-                            .session
-                            .selected_item()
-                            .map(|_| self.session.result_key(self.session.selected()))
-                            .unwrap_or_default();
-                        let result = self.plugins.copy(
-                            &command,
-                            operation,
-                            || {
-                                self.session.selected_item().is_some()
-                                    && self.session.result_key(self.session.selected()) == key
-                            },
-                            |text| tx.copy(text.to_owned()),
-                        );
-                        match result {
-                            Ok(()) => {
-                                let effects = self.session.complete_operation(&key);
-                                self.apply(effects, tx);
+                    let action = match action {
+                        dupin_core::Action::Plugin { command, operation } => {
+                            let key = self
+                                .session
+                                .selected_item()
+                                .map(|_| self.session.result_key(self.session.selected()))
+                                .unwrap_or_default();
+                            let result = self.plugins.copy(
+                                &command,
+                                operation,
+                                || {
+                                    self.session.selected_item().is_some()
+                                        && self.session.result_key(self.session.selected()) == key
+                                },
+                                |text| tx.copy(text.to_owned()),
+                            );
+                            match result {
+                                Ok(()) => {
+                                    let effects = self.session.complete_operation(&key);
+                                    self.apply(effects, tx);
+                                }
+                                Err(message) => self.notice = Some(message.into()),
                             }
-                            Err(message) => self.notice = Some(message.into()),
+                            continue;
                         }
-                        continue;
-                    }
-                    if let dupin_core::Action::Copy(text) = action {
-                        tx.copy(text);
-                        continue;
-                    }
+                        dupin_core::Action::Copy(text) => {
+                            tx.copy(text);
+                            continue;
+                        }
+                        dupin_core::Action::OpenPreferences => {
+                            self.prepare_settings();
+                            continue;
+                        }
+                        dupin_core::Action::Open(path) => dupin_mac::workspace::Action::Open(path),
+                        dupin_core::Action::Reveal(path) => dupin_mac::workspace::Action::Reveal(path),
+                        dupin_core::Action::OpenUrl(url) => dupin_mac::workspace::Action::OpenUrl(url),
+                    };
                     // Launch Services can take a moment to answer; don't hold the frame for it.
                     let running = self.running.clone();
                     running.fetch_add(1, Ordering::AcqRel);

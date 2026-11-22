@@ -8,6 +8,7 @@ pub const APPS: &str = "apps.search";
 pub const FILES: &str = "files.names";
 pub const CONTENTS: &str = "files.contents";
 pub const DICTIONARY: &str = "dictionary.lookup";
+const SETTINGS: &str = "settings.search";
 const WEB_KEYWORDS: &str = "web.keywords";
 const WEB_FALLBACKS: &str = "web.fallbacks";
 const MAX_FILE_CANDIDATES: usize = 10_000;
@@ -127,6 +128,11 @@ pub fn configured(config: &Config) -> Result<ConfiguredCommands, dupin_core::Com
     }
 
     registry.register(CommandSpec::new(
+        id(SETTINGS),
+        10,
+        presentation("Search settings", None, None, None, false, 0.0),
+    ))?;
+    registry.register(CommandSpec::new(
         id(WEB_KEYWORDS),
         1,
         presentation("Web search", None, None, None, false, 0.0),
@@ -169,7 +175,7 @@ pub fn configured(config: &Config) -> Result<ConfiguredCommands, dupin_core::Com
             defaults.push(command);
         }
     }
-    defaults.extend([id(APPS), id(WEB_KEYWORDS), id(WEB_FALLBACKS)]);
+    defaults.extend([id(APPS), id(SETTINGS), id(WEB_KEYWORDS), id(WEB_FALLBACKS)]);
     registry.set_default_providers(defaults, Some(id(WEB_KEYWORDS)))?;
     let (web, web_notice) =
         crate::web::WebCatalog::compile(config, |keyword| registry.keyword(keyword).is_some());
@@ -200,6 +206,10 @@ pub fn register(
     let file_demotions = Arc::new(RwLock::new(config.file_demotions.clone()));
     let mut providers: HashMap<_, Arc<dyn Provider>> = [
         (apps_id, apps.clone() as Arc<dyn Provider>),
+        (
+            id(SETTINGS),
+            Arc::new(dupin_mac::SettingsProvider::default()) as Arc<dyn Provider>,
+        ),
         (
             files_id,
             Arc::new(SpotlightProvider::with_demotions(
