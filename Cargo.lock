@@ -785,6 +785,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "dupin-plugin-policy"
+version = "0.0.0"
+
+[[package]]
 name = "dupin-plugin-protocol"
 version = "0.0.0"
 dependencies = [
