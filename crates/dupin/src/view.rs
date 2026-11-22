@@ -100,6 +100,7 @@ fn header(s: &Ui, t: &tok::Theme, accent: Color) -> El {
         Mode::Apps => ("Search apps", None),
         Mode::Files => ("Search files", Some("Files")),
         Mode::Contents => ("Search inside files", Some("In files")),
+        Mode::Dictionary => ("Look up a word", Some("Define")),
     };
     let field = text_input(&s.query, TextStyle::new(22.0, 400.0).lh(30.0))
         .key("query")
@@ -152,12 +153,65 @@ fn hint(s: &Ui) -> Option<&'static str> {
     ) {
         (Mode::Files, true, _) => Some("Type to search files with Spotlight  ·  ⌫ back to apps"),
         (Mode::Contents, true, _) => Some("Type to search inside files with Spotlight  ·  ⌫ back to apps"),
+        (Mode::Dictionary, true, _) => Some("Type a word  ·  ⌫ back to apps"),
+        (Mode::Dictionary, false, Results::Done) => Some("No definition found"),
         (_, false, Results::Done) => Some("No matches"),
         _ => None,
     }
 }
 
 fn results(s: &Ui, items: &[Item], t: &tok::Theme, accent: Color) -> El {
+    if s.session.mode() == Mode::Dictionary {
+        let Some(item) = items.first() else {
+            return col().key("dictionary-results");
+        };
+        let id = item.id.clone();
+        return col()
+            .key("dictionary-results")
+            .w_full()
+            .px(LIST_PAD)
+            .py(LIST_PAD)
+            .child(
+                col()
+                    .key(row_key(&item.id))
+                    .w_full()
+                    .px(22.0)
+                    .py(18.0)
+                    .gap(16.0)
+                    .radius(8.0)
+                    .fill(t.card)
+                    .child(
+                        row()
+                            .w_full()
+                            .center_y()
+                            .gap(12.0)
+                            .child(
+                                text(item.title.as_str())
+                                    .font(TextStyle::new(24.0, 600.0))
+                                    .color(t.text)
+                                    .wrap(),
+                            )
+                            .child(
+                                text("↩ Open in Dictionary")
+                                    .font(type_::BODY)
+                                    .color(accent)
+                                    .cursor(rune::Cursor::Pointer)
+                                    .hover(t.hover)
+                                    .on_press_tx(move |s: &mut Ui, tx| s.open(&id, tx)),
+                            ),
+                    )
+                    .child(
+                        col()
+                            .key("dictionary-definition")
+                            .w_full()
+                            .shrink()
+                            .min_h(20.0)
+                            .max_h(340.0)
+                            .scroll(ScrollSpec { stick_bottom: false })
+                            .child(dictionary_definition(&item.subtitle, t)),
+                    ),
+            );
+    }
     let shown = items.len().min(VISIBLE_ROWS) as f32;
     let selected = s.session.selected();
     let rows: Vec<El> = items
@@ -181,6 +235,31 @@ fn results(s: &Ui, items: &[Item], t: &tok::Theme, accent: Color) -> El {
                     .children(rows),
             ),
     )
+}
+
+fn dictionary_definition(definition: &str, t: &tok::Theme) -> El {
+    let boundaries: Vec<usize> = std::iter::once(0)
+        .chain(
+            definition
+                .match_indices('•')
+                .map(|(index, _)| index)
+                .filter(|&index| index > 0),
+        )
+        .chain(std::iter::once(definition.len()))
+        .collect();
+    col()
+        .w_full()
+        .gap(12.0)
+        .selection_group(true)
+        .children(boundaries.windows(2).enumerate().map(|(index, range)| {
+            text(definition[range[0]..range[1]].trim_end())
+                .key(format!("definition-paragraph-{index}"))
+                .w_full()
+                .font(TextStyle::new(16.0, 400.0).lh(25.0))
+                .color(t.text)
+                .wrap()
+                .selectable(true)
+        }))
 }
 
 fn result_row(s: &Ui, item: &Item, on: bool, t: &tok::Theme, accent: Color) -> El {
