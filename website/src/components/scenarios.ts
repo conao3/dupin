@@ -148,11 +148,21 @@ const tah = [trip, booking, packing, budget];
 const meeting = file('meeting-notes.md', '~/Notes', 'doc');
 const reading = file('reading-list.md', '~/Notes', 'doc');
 
+export const recent = [
+	claude,
+	ideas,
+	terminal,
+	invoice10,
+	chatgpt,
+	trip,
+	calendar,
+	meeting,
+] satisfies Row[];
+
 export const scenarios: [Scenario, ...Scenario[]] = [
 	{
 		query: 'cl',
 		steps: {
-			'': [claude, ideas, terminal, invoice10, chatgpt, trip, calendar, meeting],
 			c,
 			cl: [claude, clock, calculator, calendar, console_, colorsync],
 		},

@@ -21,7 +21,7 @@ grants = [] # add "clipboard-write" only to allow its Copy result action
 
 [plugins.recent]
 enabled = true # recent and frequent apps/files in an empty app search
-grants = [] # add "clipboard-write" to allow its Copy paths action
+grants = [] # add "clipboard-write" to allow its Copy path action
 ```
 
 At launch, a parse error makes Dupin use the defaults and report the problem. During a reload, a parse error or unavailable new hotkey keeps the previous configuration. The error appears in Settings and the next time the panel is shown; a reload never opens the panel itself. Fixing the file clears the error. An empty `hotkey` disables the global shortcut.

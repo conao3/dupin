@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import { backdrops, createRenderer, srgb, type Renderer } from './backdrop.ts';
 	import { repo } from '../site.ts';
-	import { marked, marking, scenarios, type Scenario } from './scenarios.ts';
+	import { marked, marking, recent, scenarios, type Scenario } from './scenarios.ts';
 
 	const [first] = scenarios;
 	// The panel starts hidden; the demo opens it with the hotkey, as a person would.
@@ -17,7 +17,7 @@
 	let searching = $state(false);
 	let selected = $state(0);
 	let actionsOpen = $state(false);
-	const rows = $derived(shown.steps[found.toLowerCase()] ?? []);
+	const rows = $derived(shown.steps[found.toLowerCase()] ?? (!mode && found === '' ? recent : []));
 	const stackedResult = $derived(
 		shown.result !== undefined &&
 		([...shown.query].length > 20 || [...shown.result].length > 20),
