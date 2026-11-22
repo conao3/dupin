@@ -11,6 +11,7 @@ Dupin lives in the background with no Dock icon or menu bar. Its hotkey (⌘Spac
 | Space on an empty query          | Search files with Spotlight, by file and display name |
 | `in` then Space                  | Search inside files with Spotlight, as Alfred's `in`  |
 | `define` or `d`, then Space      | Look up a word in macOS dictionaries                  |
+| Calculation or unit conversion   | Show a calculator result above app matches            |
 | ⌫ on an empty query              | Leave file, content or dictionary search              |
 | ↑ ↓                              | Move the selection                                    |
 | ↑ on an empty query, then ↑ ↓    | Recall searches in the current mode                   |
@@ -49,5 +50,11 @@ result's action menu: Open, Reveal in Finder and Copy path. Escape cancels the
 menu and returns to the search. The same menu is available for app results.
 
 `define` or `d` followed by Space switches to Dictionary Services ("Define"). Type a word to see its definition from the dictionaries enabled in Dictionary.app. Right Arrow, Cmd+K, Enter or the Actions link opens its menu; choose Open in Dictionary to launch the external app. Backspace on an empty query returns to app search. Set `dictionary_keywords` in [configuration](./configuration.md) to choose other aliases.
+
+Arithmetic and local unit conversions appear as a source/result card alongside
+app search; no keyword is needed. Enter copies the result only after **Copy
+results** has been granted in Settings → Plugins → Calculator. Without that
+grant, the query remains in place and the panel explains where to enable copying.
+Currency conversion is not available in the launcher yet.
 
 You can also paste a complete query such as `in release notes` or `d serendipity` into app search. Dupin accepts the same keywords and configured aliases, switches mode, and leaves the search term in the input.

@@ -2,12 +2,15 @@
 
 This is the first executable part of [the plugin proposal](plugin-design.md),
 tracked by #6, #7 and #96. It is not a stable SDK or an external-plugin loader.
-The launcher does not yet use it. Registration, capability brokerage, action
-invocation, streaming, forms and production scheduling remain separate work.
+The bundled calculator uses this protocol through the launcher's Wasm host.
+The fixture CLI and adversarial runtime tests exercise the same implementation.
+External-plugin manifests and installation, streaming and forms remain separate
+work.
 
 `dupin-plugin-protocol` has only Serde dependencies and is shared by hosts and
-guests. The calculator fixture in `experiments/plugin-protocol` exercises it
-through actual Wasm memory rather than passing native Rust objects across an ABI.
+guests. The calculator guest and the fixture in `experiments/plugin-protocol`
+exchange messages through actual Wasm memory rather than passing native Rust
+objects across an ABI.
 
 ## Messages
 
@@ -34,8 +37,9 @@ UI objects or arbitrary OS operations are accepted. The host must check the
 plugin's declared and granted clipboard-write capability at invocation time;
 displaying the action or pressing Enter does not create a grant. Protocol
 validation alone never executes an operation. The calculator declares a primary
-copy action; the fixture CLI prints that data without dispatching it. Broker and
-launcher integration remain required.
+copy action. In the launcher, the broker rechecks its grant and current result
+before the host clipboard sink runs. The fixture CLI prints the action data and
+does not dispatch it.
 
 Version 2 replaces version 1's label-only action descriptors; old wire messages
 are rejected explicitly. The private memory ABI remains version 1.
@@ -77,7 +81,8 @@ static field names without echoing message contents or JSON parser error text.
 
 ## Private Wasm transport
 
-The fixture uses a separate ABI version (`1`) and requires these exports:
+The calculator and fixture use a separate ABI version (`1`) and require these
+exports:
 
 - `dupin_abi_version() -> i32`;
 - `dupin_alloc(length: i32) -> i32`;
@@ -104,16 +109,19 @@ Initialisation/version/allocation share 1M fuel; the query receives a separate
 portable dispatch available when native tail calls cannot be guaranteed, notably
 in debug builds; increasing the native stack is not a substitute for it.
 
-The shared `dupin-plugin-runtime` host can poll a host cancellation predicate and absolute
-deadline between resumable fuel slices. The CLI uses a five-second fixture
-deadline. These checks do not pre-empt module loading, instantiation/start,
-host parsing/translation, allocations or individual charged operations; the
-start function remains bounded by startup fuel. See the fixture README
-for the execution policy and its limits.
+The shared `dupin-plugin-runtime` host polls a host cancellation predicate and
+absolute deadline between resumable fuel slices. The launcher supplies a
+two-second query deadline; the fixture CLI uses five seconds. These checks do
+not pre-empt module loading, instantiation/start, host parsing/translation,
+allocations or individual charged operations; the start function remains bounded
+by startup fuel. See the fixture README for the execution policy and its limits.
 
 Fuel bounds guest execution, not eager host parsing/translation, rendering or
 total host memory. `MAX_MODULE_BYTES` caps the input size for parsing/translation;
-neither fuel nor query deadlines bound their work. This prototype has no
-permission-bearing imports, host operation completions or external-plugin
-installation. Production cancellation/deadline integration is still required;
-this is not a claim that the production isolation and permission design is complete.
+neither fuel nor query deadlines bound their work. The runtime has no
+permission-bearing Wasm imports: the calculator's only host operation is a typed
+copy action, which the host checks and dispatches after a query completes.
+External-plugin installation, additional operations, asynchronous host
+completions and migration of the native app, file and dictionary providers remain
+future work. These bounds do not make trusted native providers a sandbox or
+complete the external-plugin permission design.

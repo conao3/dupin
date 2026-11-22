@@ -29,11 +29,13 @@ in
             buildPhase = ''
               runHook preBuild
               cargo clippy --workspace --all-targets --offline -- -D warnings
+              cargo clippy -p dupin --all-targets --no-default-features --offline -- -D warnings
               runHook postBuild
             '';
             checkPhase = ''
               runHook preCheck
               cargo test --workspace --offline
+              cargo test -p dupin --no-default-features --offline
               runHook postCheck
             '';
             installPhase = "touch $out";

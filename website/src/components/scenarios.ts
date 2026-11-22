@@ -18,6 +18,7 @@ export type Marking = 'letters' | 'run' | 'none';
 export type Scenario = {
 	mode?: 'Files' | 'In files';
 	actions?: boolean;
+	result?: string;
 	query: string;
 	/** The rows after each prefix of `query`. */
 	steps: Record<string, Row[]>;
@@ -196,6 +197,11 @@ export const scenarios: [Scenario, ...Scenario[]] = [
 			taho: tah,
 			tahoe: tah,
 		},
+	},
+	{
+		query: '560km to mi',
+		result: 'approx. 347.9678676529 mi',
+		steps: {},
 	},
 ];
 

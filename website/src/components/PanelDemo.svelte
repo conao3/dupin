@@ -18,6 +18,10 @@
 	let selected = $state(0);
 	let actionsOpen = $state(false);
 	const rows = $derived(found ? (shown.steps[found.toLowerCase()] ?? []) : []);
+	const stackedResult = $derived(
+		shown.result !== undefined &&
+		([...shown.query].length > 20 || [...shown.result].length > 20),
+	);
 	let keys = $state<{ id: number; label: string }[]>([]);
 	let keysShown = $state(false);
 	let desk: HTMLElement;
@@ -232,9 +236,14 @@
 					actionsOpen = false;
 					await sleep(600);
 				}
-				press('↩', true);
-				launching = true;
-				await sleep(220);
+				if (scenario.result) {
+					press('Esc', true);
+					await sleep(220);
+				} else {
+					press('↩', true);
+					launching = true;
+					await sleep(220);
+				}
 				open = false;
 				launching = false;
 				query = '';
@@ -271,6 +280,20 @@
 		</div>
 		{#if rows.length === 0 && mode && !query}
 			<div class="hint">{hints[mode]}</div>
+		{:else if shown.result && found === shown.query}
+			<div class="result-card">
+				<div class={['pair', stackedResult && 'is-stacked']}>
+					<div class="pair-value">
+						<span>{shown.query}</span>
+						<small>Source</small>
+					</div>
+					<span class="arrow">{stackedResult ? '↓' : '→'}</span>
+					<div class="pair-value">
+						<span>{shown.result}</span>
+						<small>Result</small>
+					</div>
+				</div>
+			</div>
 		{:else if rows.length === 0 && found && !searching}
 			<div class="hint">No matches</div>
 		{:else if rows.length > 0}
@@ -442,6 +465,59 @@
 		padding: 0 20px;
 		font-size: 13px;
 		color: var(--dupin-text-secondary);
+	}
+
+	.result-card {
+		margin: 6px;
+		padding: 34px 20px;
+		border-radius: 10px;
+		background: oklch(0.36 0.005 265 / 0.55);
+	}
+
+	.pair {
+		display: flex;
+		align-items: center;
+		gap: 16px;
+	}
+
+	.pair-value {
+		display: flex;
+		flex: 1;
+		flex-direction: column;
+		gap: 6px;
+		min-width: 0;
+		text-align: center;
+	}
+
+	.pair-value > span {
+		overflow-wrap: anywhere;
+		font-size: clamp(17px, 3vw, 28px);
+		font-weight: 600;
+		line-height: 1.3;
+	}
+
+	.pair-value > small {
+		align-self: center;
+		padding: 3px 10px;
+		border-radius: 999px;
+		background: rgb(255 255 255 / 0.12);
+		color: var(--dupin-text-secondary);
+		font-size: 12px;
+	}
+
+	.pair.is-stacked {
+		flex-direction: column;
+		gap: 8px;
+	}
+
+	.pair.is-stacked .pair-value {
+		flex: none;
+		width: 100%;
+	}
+
+	.arrow {
+		color: var(--dupin-text-secondary);
+		font-size: 24px;
 	}
 
 	.rows {

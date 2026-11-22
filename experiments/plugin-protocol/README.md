@@ -1,11 +1,11 @@
 # Calculator query protocol fixture
 
-This separate workspace exercises the [experimental query protocol](../../docs/plugin-protocol.md)
-with a real calculator Wasm guest. It is not loaded by Dupin and changes no app
-permissions, entitlements or runtime dependency. The protocol and bounded Wasm
-host live in the root workspace as `dupin-plugin-protocol` and
-`dupin-plugin-runtime`; the fixture CLI uses that same host implementation.
-Neither crate adds a runtime dependency to the launcher executable.
+This separate workspace exercises the [query protocol](../../docs/plugin-protocol.md)
+with the calculator Wasm guest. Dupin bundles that guest and uses the shared
+`dupin-plugin-runtime` to answer calculator queries. The fixture CLI exercises
+the same host implementation without launching Dupin or touching its
+permissions. The root workspace contains `dupin-plugin-protocol` and
+`dupin-plugin-runtime`.
 
 Build the guest using the repository's Rust toolchain and bare Wasm standard
 library. Nix's temporary linker shell supplies `lld` without a global install:
@@ -22,11 +22,13 @@ cargo run --manifest-path experiments/plugin-protocol/Cargo.toml --locked \
 
 The host prints a validated JSON response. The checked-in requests also cover
 arithmetic and a zero-limit pathological expression. The latter must return
-an empty result without evaluating it. There are no clipboard, URL, network,
-file-search or calendar operations in this fixture.
+an empty result without evaluating it. There are no URL, network, file-search or
+calendar operations in this fixture.
 The calculator is stateless and rejects supplied saved state explicitly.
 The evaluator lives in the independently buildable [calculator plugin](../../plugins/calculator/README.md).
-This workspace contains only the fixture host. Enter-copy remains parent integration work.
+This workspace contains only the fixture host. Its Copy result action is data
+only in this CLI; the launcher checks the separate clipboard grant before
+dispatching it.
 
 ```sh
 cargo test --manifest-path plugins/calculator/Cargo.toml --locked
@@ -67,6 +69,7 @@ through this linker API. Host parsing/translation, allocation and a single
 charged operation cannot be interrupted by these checks. Startup and host
 resource limits still need review before external modules run in the app.
 
-This validates a query-only path. Manifest registration, action execution,
-capability grants, production cancellation/deadline integration and rendering remain
-required before this is a usable plugin platform.
+This validates the calculator's bundled query path and a standalone fixture.
+External manifests and installation, additional brokered operations, persistent
+guest storage, forms and work on all feature-specific native providers remain
+outside this implementation.

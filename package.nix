@@ -6,6 +6,7 @@
   inter,
   stdenvNoCC,
   calculatorPlugin,
+  withWasm ? true,
 }:
 let
   root = ./.;
@@ -52,7 +53,8 @@ let
       cargoBuildFlags = [
         "--package"
         "dupin"
-      ];
+      ]
+      ++ lib.optional (!withWasm) "--no-default-features";
       # Tests run in the lint-and-test check, in debug as cargo runs them.
       doCheck = false;
       # The app icon is drawn from the logo here, so no generated image is committed. iconutil
@@ -111,8 +113,10 @@ stdenvNoCC.mkDerivation {
     mkdir -p $out/Applications $out/bin
     cp -R ${nativeApplication}/Applications/Dupin.app $out/Applications/Dupin.app
     chmod -R u+w $out/Applications/Dupin.app
-    mkdir -p $out/Applications/Dupin.app/Contents/Resources/plugins
-    cp ${calculatorPlugin}/share/dupin/plugins/calculator.wasm $out/Applications/Dupin.app/Contents/Resources/plugins/calculator.wasm
+    ${lib.optionalString withWasm ''
+      mkdir -p $out/Applications/Dupin.app/Contents/Resources/plugins
+      cp ${calculatorPlugin}/share/dupin/plugins/calculator.wasm $out/Applications/Dupin.app/Contents/Resources/plugins/calculator.wasm
+    ''}
     ln -s $out/Applications/Dupin.app/Contents/MacOS/dupin $out/bin/dupin
   '';
   passthru = { inherit commonArgs cargoDeps nativeApplication; };

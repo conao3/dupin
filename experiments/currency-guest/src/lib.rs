@@ -109,7 +109,7 @@ fn valid_date(date: &str) -> bool {
     year > 0 && (1..=12).contains(&month) && day > 0 && day <= days[month - 1]
 }
 fn calculate(query: &str, snapshot: Snapshot) -> Option<String> {
-    // The gate recognises conversion requests; fend owns expression semantics.
+    // The gate accepts conversion requests; fend owns expression semantics.
     let (expression, target) = query.rsplit_once(" in ").or_else(|| query.rsplit_once(" to "))?;
     let target = target.trim().to_ascii_uppercase();
     if !snapshot.rates.iter().any(|r| r.code == target) {

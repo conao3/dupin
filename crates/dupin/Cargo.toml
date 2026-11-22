@@ -8,11 +8,15 @@ publish.workspace = true
 homepage.workspace = true
 license.workspace = true
 
+[features]
+default = ["wasm-runtime"]
+wasm-runtime = ["dep:dupin-plugin-runtime"]
+
 [dependencies]
 dupin-core = { workspace = true }
 dupin-mac = { workspace = true }
 dupin-plugin-protocol = { workspace = true }
-dupin-plugin-runtime = { path = "../dupin-plugin-runtime" }
+dupin-plugin-runtime = { path = "../dupin-plugin-runtime", optional = true }
 dupin-plugin-policy = { path = "../dupin-plugin-policy" }
 dupin-plugin-broker = { path = "../dupin-plugin-broker" }
 libc = { workspace = true }

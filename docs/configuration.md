@@ -12,6 +12,10 @@ position = "center" # "center" puts the field at the middle of the display; "top
 input_source = "ascii" # "ascii", "keep", or an input source identifier such as "com.apple.keylayout.ABC"
 auto_update = true # whether a release build checks for and installs its channel's updates by itself
 backdrop = "off" # "off", "flow", or the path to a WGSL shader
+
+[plugins.calculator]
+enabled = true # bundled calculator is enabled by default
+grants = [] # add "clipboard-write" only to allow its Copy result action
 ```
 
 An unknown key or an invalid value makes Dupin fall back to the defaults and say why, in the log and in the panel.
@@ -19,6 +23,13 @@ An unknown key or an invalid value makes Dupin fall back to the defaults and say
 Set `dictionary_keywords` to a list of aliases for Dictionary search. The defaults are `define` and `d`; add, remove or replace entries to suit your workflow. Edits to the file take effect after relaunch.
 
 Aliases must be non-empty, have no leading or trailing whitespace and leave other commands' keywords, such as `in`, available. Dupin reports invalid or conflicting aliases in the panel and ignores those entries; the other aliases still work.
+
+The bundled calculator runs alongside app search and handles arithmetic and
+unit conversions without a keyword. It needs no permission to calculate. Its
+**Copy results** capability is off by default; grant it in Settings → Plugins →
+Calculator before Enter can copy an answer. Starting Dupin or enabling the
+calculator does not request OS access. Currency conversion is not included yet;
+the currency guest in the repository is a test fixture with fixed sample rates.
 
 ## Updates
 

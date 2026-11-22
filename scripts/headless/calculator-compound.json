@@ -1,0 +1,6 @@
+{
+	"events": [
+		{ "t": 0.1, "type": "type", "text": "30*(60+1) km in mi" },
+		{ "t": 2.5, "type": "mark", "name": "end" }
+	]
+}

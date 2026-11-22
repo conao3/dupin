@@ -64,7 +64,11 @@ enum Page {
 impl Page {
     /// The pages this build has: Updates only where there's an update feed.
     fn all(updates: bool) -> Vec<Page> {
-        let mut pages = vec![Page::General, Page::Search, Page::Plugins, Page::Appearance];
+        let mut pages = vec![Page::General, Page::Search];
+        if !crate::plugins::descriptors().is_empty() {
+            pages.push(Page::Plugins);
+        }
+        pages.push(Page::Appearance);
         if updates {
             pages.push(Page::Updates);
         }

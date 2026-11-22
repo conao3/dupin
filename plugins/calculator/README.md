@@ -1,9 +1,10 @@
 # Calculator guest
 
-This separate workspace builds an rlib and a bare wasm32-unknown-unknown cdylib,
-with public `handle`, version 2 JSON messages and private memory ABI version 1. It has no launcher
-dependency. See the [fixture commands](../../experiments/plugin-protocol/README.md).
-Generated Wasm modules are not checked in.
+This separate workspace builds an rlib and a bare `wasm32-unknown-unknown`
+cdylib, with public `handle`, version 2 JSON messages and private memory ABI
+version 1. Dupin bundles the generated module and runs it through
+`dupin-plugin-runtime`. See the [fixture commands](../../experiments/plugin-protocol/README.md).
+Generated Wasm modules are not checked in; Nix builds and packages them.
 
 Fend-core 1.5.9 parses and evaluates each query in a fresh context with default
 temperature mode, no RNG and no exchange-rate handler. Host fuel, cancellation
@@ -34,6 +35,13 @@ returns before evaluation. Results use generic Pair source/result views and
 a declared `copy_text` primary action carrying the displayed answer. The host
 must validate clipboard-write access before dispatch; a result is not a grant.
 
-Enter-copy, broker permissions, runtime adoption measurements, registration and
-the landing demo remain parent integration work. This does not ship a launcher
-calculator.
+The launcher registers this plugin alongside app search. Its result can be
+copied with Enter only after the user grants **Copy results** in Settings →
+Plugins → Calculator. The grant is checked again immediately before writing to
+the clipboard; calculation itself needs no permission. The plugin is bundled
+with the Wasm runtime by default, while the `dupin-no-wasm` Nix package builds a
+native-only launcher without plugin results or the Plugins settings page.
+
+The currency guest under `experiments/currency-guest` is an offline test fixture,
+not a shipped currency feature. Network rate acquisition, persistent caching,
+and its age/status flow remain unimplemented.

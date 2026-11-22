@@ -78,3 +78,47 @@ credentials. It does not reproduce Developer ID certificates, notary submission 
 stapling. ZIP metadata and signing can vary between runs. No DMG or memory/latency
 measurement is included here; the calculator experiment covers execution timing
 and limits separately. These results alone do not adopt a runtime.
+
+## Current integrated footprint gate
+
+`measure-integrated.nu` measures the app and guest layout used by the integrated
+plugin host. Run it from an Apple silicon Mac after committing the source being
+measured:
+
+```sh
+nu experiments/wasm-app-size/measure-integrated.nu --prepare-only
+nu experiments/wasm-app-size/measure-integrated.nu
+```
+
+The first command records the source state and toolchain metadata without
+building the app variants. A full run builds five Nix outputs from that exact
+Git revision, with GC roots inside its temporary directory, then signs and
+archives disposable app copies. It records the
+stripped executable size, signed executable size, total regular-file bytes in
+the signed app, and updater-format ZIP size for each case:
+
+- native app built with the Wasm runtime feature disabled;
+- the integrated runtime executable with its plugin resources removed;
+- that same executable with a minimal valid Wasm plugin resource;
+- the same executable with the calculator guest;
+- the same executable with both the calculator and offline currency fixture.
+
+Only the first two cases change the executable. The final three use the same
+integrated binary and vary its bundled resources. The minimal plugin exports the
+runtime ABI and returns a static protocol-v2 empty-results reply. Its only valid
+correlation is for a request with `request_id = "minimal-probe-1"` and
+`generation = "1"`; the fixture ignores the other request fields. The app-size
+script only bundles this resource and never launches or executes it. The
+currency fixture is included only to count a second realistic guest and is not
+registered as a product feature.
+
+The JSON records the source commit and dirty state, the script and packaging
+helper hashes, the root nixpkgs lock entry, Rust and macOS versions, Nix output
+paths, runtime settings, and each guest's size and SHA-256. The temporary
+directory is printed with the result; it contains `results.json`, signed apps,
+ZIPs, and the Nix GC roots. Removing it releases those roots.
+
+This gate measures package footprint only. It does not launch the app, execute
+the guest, benchmark queries, measure cancellation or memory, or prove runtime
+adoption. Ad-hoc signing checks hardened-runtime compatibility without
+additional entitlements, Developer ID signing, notarisation, or stapling.

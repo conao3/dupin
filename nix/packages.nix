@@ -3,7 +3,14 @@
     { pkgs, ... }:
     let
       calculator-plugin = pkgs.callPackage ./calculator-plugin.nix { };
+      currency-guest = pkgs.callPackage ./currency-guest.nix { };
+      minimal-plugin = pkgs.runCommand "dupin-minimal-plugin" { nativeBuildInputs = [ pkgs.wabt ]; } ''
+        mkdir -p $out/share/dupin/plugins
+        wat2wasm ${../experiments/wasm-app-size/minimal-plugin.wat} \
+          -o $out/share/dupin/plugins/minimal.wasm
+      '';
       dupin = pkgs.callPackage ../package.nix { calculatorPlugin = calculator-plugin; };
+      dupin-no-wasm = dupin.override { withWasm = false; };
       # scripts/package-app.nu lays out Dupin.dmg over this.
       dmg-background =
         pkgs.runCommand "dupin-dmg-background"
@@ -21,7 +28,14 @@
     in
     {
       packages = {
-        inherit dupin dmg-background calculator-plugin;
+        inherit
+          dupin
+          dupin-no-wasm
+          dmg-background
+          calculator-plugin
+          currency-guest
+          minimal-plugin
+          ;
         default = dupin;
       };
     };

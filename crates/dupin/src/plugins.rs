@@ -1,15 +1,24 @@
 use std::collections::HashMap;
+#[cfg(feature = "wasm-runtime")]
 use std::io::Read;
+#[cfg(feature = "wasm-runtime")]
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, OnceLock};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+#[cfg(feature = "wasm-runtime")]
+use std::{sync::OnceLock, time::Instant};
 
 use dupin_core::config::PluginSettings;
-use dupin_core::{Action, CommandId, Config, Item, ItemAction, Provider, ProviderError, Request};
-use dupin_plugin_broker::PreparedCopy;
-use dupin_plugin_policy::{Capability, PluginHandle, Policy};
-use dupin_plugin_protocol::{Operation, Outcome, VERSION};
+#[cfg(feature = "wasm-runtime")]
+use dupin_core::{Action, Item, ItemAction, ProviderError, Request};
+use dupin_core::{CommandId, Config, Provider};
+use dupin_plugin_broker::{PrepareError, PreparedCopy};
+use dupin_plugin_policy::{Access, Capability, PluginHandle, Policy};
+use dupin_plugin_protocol::Operation;
+#[cfg(feature = "wasm-runtime")]
+use dupin_plugin_protocol::{Outcome, VERSION};
+#[cfg(feature = "wasm-runtime")]
 use dupin_plugin_runtime::{GuestModule, HostError, MAX_MODULE_BYTES, QueryControl};
 
 pub struct CapabilityDescriptor {
@@ -26,12 +35,15 @@ pub struct Descriptor {
     pub command: &'static str,
     pub default_enabled: bool,
     pub capabilities: &'static [CapabilityDescriptor],
+    #[cfg(feature = "wasm-runtime")]
     guest_command: &'static str,
+    #[cfg(feature = "wasm-runtime")]
     module: &'static str,
 }
 
 pub const DEADLINE: Duration = Duration::from_secs(2);
 
+#[cfg(feature = "wasm-runtime")]
 pub fn descriptors() -> &'static [Descriptor] {
     static PLUGINS: &[Descriptor] = &[Descriptor {
         id: "calculator",
@@ -49,6 +61,11 @@ pub fn descriptors() -> &'static [Descriptor] {
         }],
     }];
     PLUGINS
+}
+
+#[cfg(not(feature = "wasm-runtime"))]
+pub fn descriptors() -> &'static [Descriptor] {
+    &[]
 }
 
 pub fn settings(config: &Config, plugin: &Descriptor) -> PluginSettings {
@@ -110,6 +127,10 @@ impl Services {
     }
 
     pub fn providers(&self) -> HashMap<CommandId, Arc<dyn Provider>> {
+        #[cfg(not(feature = "wasm-runtime"))]
+        return HashMap::new();
+
+        #[cfg(feature = "wasm-runtime")]
         descriptors()
             .iter()
             .map(|plugin| {
@@ -135,8 +156,13 @@ impl Services {
         sink: impl FnOnce(&str),
     ) -> Result<(), &'static str> {
         let entry = self.installed.get(command).ok_or("This plugin is unavailable.")?;
-        let copy = PreparedCopy::prepare(&self.policy, &entry.handle, operation)
-            .map_err(|_| "Allow this plugin to copy results in Settings → Plugins.")?;
+        let copy =
+            PreparedCopy::prepare(&self.policy, &entry.handle, operation).map_err(|error| match error {
+                PrepareError::Access(Access::NeedsGrant) => {
+                    "Allow this plugin to copy results in Settings → Plugins."
+                }
+                _ => "This action is no longer available.",
+            })?;
         copy.dispatch(&self.policy, is_current, sink)
             .map_err(|_| "This action is no longer available.")
     }
@@ -146,12 +172,14 @@ pub fn command_id(plugin: &Descriptor) -> CommandId {
     CommandId::new(plugin.command).expect("bundled command IDs are valid")
 }
 
+#[cfg(feature = "wasm-runtime")]
 struct GuestProvider {
     plugin: &'static Descriptor,
     enabled: Arc<AtomicBool>,
     module: OnceLock<Result<GuestModule, HostError>>,
 }
 
+#[cfg(feature = "wasm-runtime")]
 impl Provider for GuestProvider {
     fn search(&self, request: &Request, emit: &mut dyn FnMut(Vec<Item>)) -> Result<(), ProviderError> {
         if !self.enabled.load(Ordering::Acquire) || request.limit == 0 || request.is_cancelled() {
@@ -171,15 +199,17 @@ impl Provider for GuestProvider {
             limit: request.limit.min(dupin_plugin_protocol::MAX_RESULTS as usize) as u32,
             state: None,
         };
-        let response = module
-            .query_controlled(
-                &message,
-                &QueryControl {
-                    deadline: Instant::now() + DEADLINE,
-                    is_cancelled: &|| request.is_cancelled() || !self.enabled.load(Ordering::Acquire),
-                },
-            )
-            .map_err(|_| ProviderError)?;
+        let response = match module.query_controlled(
+            &message,
+            &QueryControl {
+                deadline: Instant::now() + DEADLINE,
+                is_cancelled: &|| request.is_cancelled() || !self.enabled.load(Ordering::Acquire),
+            },
+        ) {
+            Ok(response) => response,
+            Err(HostError::Fuel | HostError::Deadline | HostError::Cancelled) => return Ok(()),
+            Err(_) => return Err(ProviderError),
+        };
         let Outcome::Results { items, .. } = response.outcome else {
             return Err(ProviderError);
         };
@@ -215,6 +245,7 @@ impl Provider for GuestProvider {
     }
 }
 
+#[cfg(feature = "wasm-runtime")]
 fn load_module(plugin: &Descriptor) -> Result<GuestModule, HostError> {
     let path = module_path(plugin).ok_or(HostError::InvalidModule)?;
     let file = std::fs::File::open(path).map_err(|_| HostError::InvalidModule)?;
@@ -225,6 +256,7 @@ fn load_module(plugin: &Descriptor) -> Result<GuestModule, HostError> {
     GuestModule::load(&bytes)
 }
 
+#[cfg(feature = "wasm-runtime")]
 fn module_path(plugin: &Descriptor) -> Option<PathBuf> {
     if cfg!(debug_assertions) {
         return Some(
@@ -245,7 +277,7 @@ fn module_path(plugin: &Descriptor) -> Option<PathBuf> {
     )
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "wasm-runtime"))]
 mod tests {
     use super::*;
 
