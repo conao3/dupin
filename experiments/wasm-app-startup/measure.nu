@@ -92,6 +92,8 @@ def prepare-app [source: path, destination: path]: nothing -> record {
     ) | ignore
     checked /usr/bin/codesign --verify --strict $destination | ignore
     {
+        source_app: ($source | path expand --strict)
+        source_executable_sha256: (sha256 $executable)
         app: $destination
         executable: ($binary | path expand --strict)
         executable_sha256: (sha256 $binary)
@@ -266,7 +268,7 @@ def main [
         error make {msg: $"output path already exists: ($output)"}
     }
     mkdir $output
-    let work = mktemp --directory --tmpdir-path $output | path expand --strict
+    let work = mktemp --directory | path expand --strict
     let script = $env.FILE_PWD | path join measure.nu | path expand --strict
     let source_root = $env.FILE_PWD | path dirname | path dirname | path expand --strict
     let usage_source = $env.FILE_PWD | path join usage.c | path expand --strict
@@ -276,6 +278,8 @@ def main [
         source: {
             commit: (checked git -C $source_root rev-parse HEAD)
             status: (checked git -C $source_root status --porcelain)
+            github_sha: ($env.GITHUB_SHA? | default null)
+            pull_request_head: ($env.PR_HEAD_SHA? | default null)
         }
         script_sha256: (sha256 $script)
         helper_source_sha256: (sha256 $usage_source)
@@ -291,6 +295,8 @@ def main [
         runner_config: (config-text)
         signing: 'Disposable app copies; Nix store links replaced with macOS system libraries; ad-hoc hardened-runtime signature; no extra entitlements.'
     }
+
+    $metadata | to json | save ($output | path join metadata.json)
 
     (checked
         /usr/bin/clang
@@ -315,28 +321,49 @@ def main [
         }
     }
     let variants = {native: $native, wasm: $wasm}
-    let measurements = (0..<$pairs | each {|pair|
-        variant-order $pair | enumerate | each {|entry|
-            let label = $entry.item
-            one-run $helper ($variants | get $label | get executable) $label $pair $entry.index $work $sample_seconds $ready_timeout
-        }
-    } | flatten)
+    let guest = $wasm.app | path join Contents Resources plugins calculator.wasm
+    if not ($guest | path exists) or ($native.app | path join Contents Resources plugins calculator.wasm | path exists) {
+        error make {msg: 'expected a calculator module only in the Wasm bundle'}
+    }
+    let provenance = $metadata | insert bundles $variants | insert calculator_sha256 (sha256 $guest)
+    $provenance | to json | save --force ($output | path join metadata.json)
+    let journal = $output | path join measurements.jsonl
+    '' | save $journal
+    let outcome = try {
+        0..<$pairs | each {|pair|
+            variant-order $pair | enumerate | each {|entry|
+                let label = $entry.item
+                let measurement = one-run $helper ($variants | get $label | get executable) $label $pair $entry.index $output $sample_seconds $ready_timeout
+                $measurement | to json --raw | $"($in)\n" | save --append $journal
+            }
+        } | ignore
+        {ok: true, problem: null}
+    } catch {|error|
+        {ok: false, problem: $error.msg}
+    }
+    let measurements = open --raw $journal | lines | each { from json }
     let result = {
-        metadata: ($metadata | insert app_executables {
-            native: {sha256: $native.executable_sha256}
-            wasm: {sha256: $wasm.executable_sha256}
-        })
+        metadata: $provenance
+        outcome: $outcome
         measurements: $measurements
-        run_directory: ($work | path relative-to $output)
         notes: [
             'The app stays hidden and receives no UI input; hotkey registration and update checks are disabled in an isolated per-run home.'
             'Measurements stop before the first plugin query, so they cover host startup and pre-query idle runtime cost only.'
+            'The calculator module is never loaded or instantiated during these runs.'
+            'Pair 1 is the first launch of each freshly signed copy; later pairs reuse those copies. This is not a cold-machine comparison.'
+            'runner_spawn_to_ready_ms uses the wall clock and 25 ms readiness polling, including shell, exec and pre-main time.'
             'Lifetime maximum footprint includes startup and idle wait through the sample; it does not include a query or render peak.'
             'Each pair alternates which variant starts first. Raw per-process observations are retained; this experiment does not set an adoption budget.'
         ]
     }
     let result_path = $output | path join results.json
     $result | to json | save --force $result_path
+    rm --recursive --force $work
+    if not $outcome.ok {
+        error make {
+            msg: $"measurement failed; partial results saved in ($result_path): ($outcome.problem)"
+        }
+    }
     print (
         {
             output: $output

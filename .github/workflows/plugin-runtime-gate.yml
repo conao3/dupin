@@ -36,14 +36,17 @@ jobs:
       - uses: ./.github/actions/setup-nix-cache
       - name: Build both variants from the same source
         run: |
-          nix build .#dupin-no-wasm --out-link native-app
-          nix build .#dupin --out-link wasm-app
+          nix build .#dupin-no-wasm --out-link "$RUNNER_TEMP/native-app"
+          nix build .#dupin --out-link "$RUNNER_TEMP/wasm-app"
       - name: Install the measurement interpreter
         run: nix profile install --inputs-from . nixpkgs#nushell
       - name: Measure hidden native startup and idle process memory
+        env:
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
+          nu experiments/wasm-app-startup/tests.nu
           nu experiments/wasm-app-startup/measure.nu \
-            native-app/Applications/Dupin.app wasm-app/Applications/Dupin.app \
+            "$RUNNER_TEMP/native-app/Applications/Dupin.app" "$RUNNER_TEMP/wasm-app/Applications/Dupin.app" \
             --pairs 3 --output "$RUNNER_TEMP/plugin-runtime-measurements"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()

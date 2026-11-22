@@ -35,6 +35,19 @@ individual samples, executable SHA-256 values, source status, macOS and hardware
 versions, helper and script hashes, and the signing and measurement definitions.
 It does not set an adoption budget or claim results before a run is recorded.
 
+Metadata is saved before launching either app, and each completed run is appended
+to `measurements.jsonl`. A later failure preserves those observations and writes
+the failure to `results.json`. App copies and the compiled helper stay outside
+the uploaded output directory. Both original and signed executable hashes are
+recorded, and the runner checks that only the Wasm bundle has `calculator.wasm`
+and records its hash.
+
+The calculator module is never loaded or instantiated here: it loads on the
+first search. Pair 1 is the first launch of each freshly signed copy; later
+pairs reuse it. The experiment does not ensure a cold file cache. The separate
+`runner_spawn_to_ready_ms` observation uses the wall clock and 25 ms polling,
+including shell, exec and pre-`main` time; `startup_ms` uses the monotonic clock.
+
 These numbers cover host startup and pre-query idle use only. The lifetime peak
 includes startup and the quiet wait through a sample; it does not include
 calculator execution or a rendered launcher frame. They do not measure cold
