@@ -642,7 +642,7 @@ fn plugins(s: &Prefs, k: &Kit) -> Vec<El> {
             .on_toggle(move |s: &mut Prefs| {
                 s.set(|config| {
                     let mut settings = crate::plugins::settings(config, plugin);
-                    settings.enabled = !settings.enabled;
+                    settings.enabled = !current.enabled;
                     config.plugins.insert(plugin.id.into(), settings);
                 })
             })
@@ -663,9 +663,8 @@ fn plugins(s: &Prefs, k: &Kit) -> Vec<El> {
                 .on_toggle(move |s: &mut Prefs| {
                     s.set(|config| {
                         let mut settings = crate::plugins::settings(config, plugin);
-                        if settings.grants.iter().any(|id| id == capability.id) {
-                            settings.grants.retain(|id| id != capability.id);
-                        } else {
+                        settings.grants.retain(|id| id != capability.id);
+                        if !granted {
                             settings.grants.push(capability.id.into());
                         }
                         config.plugins.insert(plugin.id.into(), settings);

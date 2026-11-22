@@ -26,7 +26,8 @@ Completed searches are remembered for the current Dupin process when you clear
 the input, hide the panel or activate a result. With an empty input, ↑ recalls the
 latest term in the current mode; further ↑ and ↓ walk through those terms and
 back to the empty input. Editing a recalled term restores normal result selection.
-This history holds up to 100 terms and is separate from app-ranking history.
+This query history holds up to 100 terms and is separate from the local usage
+history that ranks and supplies Recent suggestions.
 
 ## Apps
 
@@ -37,6 +38,14 @@ Dupin finds the `.app` bundles in `/Applications`, `/System/Applications` and `~
 - Spotlight's alternate names and keywords: ChatGPT answers to "Codex", its former name, System Settings to "System Preferences", Safari to "browser".
 
 When an app matches through one of those other names, the name shows before its folder in the result.
+
+With an empty app search, Dupin shows up to ten recent and frequent apps and
+files from its local usage history. Typing resumes regular app search; explicit
+Files and Dictionary searches keep their own empty-query hints. Showing or
+selecting a suggestion does not record a visit; opening it does. Entries whose
+paths no longer exist are skipped. Recent asks for no macOS permission; its
+optional Copy path action requires the Copy paths grant in Settings → Plugins →
+Recent.
 
 ## Files
 

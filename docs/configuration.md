@@ -18,6 +18,10 @@ backdrop = "off" # "off", "flow", or the path to a WGSL shader
 [plugins.calculator]
 enabled = true # bundled calculator is enabled by default
 grants = [] # add "clipboard-write" only to allow its Copy result action
+
+[plugins.recent]
+enabled = true # recent and frequent apps/files in an empty app search
+grants = [] # add "clipboard-write" to allow its Copy paths action
 ```
 
 At launch, a parse error makes Dupin use the defaults and report the problem. During a reload, a parse error or unavailable new hotkey keeps the previous configuration. The error appears in Settings and the next time the panel is shown; a reload never opens the panel itself. Fixing the file clears the error. An empty `hotkey` disables the global shortcut.
@@ -32,6 +36,19 @@ unit conversions without a keyword. It needs no permission to calculate. Its
 Calculator before Enter can copy an answer. Starting Dupin or enabling the
 calculator does not request OS access. Currency conversion is not included yet;
 the currency guest in the repository is a test fixture with fixed sample rates.
+
+Recent is a native plugin and remains available in builds without calculator
+Wasm support. Showing or opening its suggestions needs no macOS permission;
+**Copy paths** is an optional plugin grant shown under Settings → Plugins →
+Recent. Set this to keep an empty app search blank:
+
+```toml
+[plugins.recent]
+enabled = false
+grants = []
+```
+
+This setting reloads with other configuration file edits while Dupin runs.
 
 Choose **Relaunch** in Settings → General to restart Dupin. File edits reload automatically. Relaunch remains available when the configuration is read-only, including Nix-managed files. If an update is already staged, relaunch installs it first.
 

@@ -393,11 +393,19 @@ impl Session {
         self.commands.command(id)
     }
     pub(crate) fn provider_ids(&self) -> Vec<CommandId> {
-        if self.explicit {
+        let candidates = if self.explicit {
             vec![self.command.clone()]
         } else {
             self.commands.providers(&self.command)
-        }
+        };
+        candidates
+            .into_iter()
+            .filter(|id| {
+                self.commands
+                    .command(id)
+                    .is_some_and(|spec| spec.query_eligibility.allows(&self.query))
+            })
+            .collect()
     }
     pub fn failures(&self) -> impl Iterator<Item = (&CommandId, &'static str)> {
         self.providers.iter().filter_map(|(id, state)| match state.phase {
@@ -606,8 +614,9 @@ impl Session {
 
     fn search(&mut self) -> Vec<Effect> {
         self.refresh_selection = None;
-        let query = self.query.trim();
-        if query.is_empty() {
+        let query = self.query.trim().to_owned();
+        let provider_ids = self.provider_ids();
+        if provider_ids.is_empty() {
             let was_searching = matches!(self.results, Results::Searching { .. });
             self.clear_results();
             return if was_searching {
@@ -616,28 +625,31 @@ impl Session {
                 Vec::new()
             };
         }
-        let query = query.to_owned();
         self.generation += 1;
         // A command change clears the previous command's rows before starting a search.
         self.results = Results::Searching { replaced: false };
-        self.active_order = self.provider_ids();
-        self.active_pin = self.commands.pinned().filter(|_| !self.explicit).cloned();
+        self.active_order.clone_from(&provider_ids);
+        self.active_pin = self
+            .commands
+            .pinned()
+            .filter(|pin| !self.explicit && provider_ids.contains(pin))
+            .cloned();
         self.active_limit = self.command().result_limit;
         self.providers = self
-            .provider_ids()
-            .into_iter()
+            .active_order
+            .iter()
             .map(|id| {
                 (
                     id.clone(),
                     ProviderState {
                         items: Vec::new(),
                         phase: ProviderPhase::Pending,
-                        limit: self.commands.command(&id).unwrap().result_limit,
+                        limit: self.commands.command(id).unwrap().result_limit,
                     },
                 )
             })
             .collect();
-        self.provider_ids()
+        provider_ids
             .into_iter()
             .map(|command| Effect::Search {
                 command,

@@ -59,12 +59,31 @@ impl QueryPresentation {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum QueryEligibility {
+    /// The command is eligible when the query contains non-whitespace text.
+    #[default]
+    NonEmpty,
+    /// The command is eligible only when the query is empty or whitespace.
+    EmptyOnly,
+}
+
+impl QueryEligibility {
+    pub(crate) fn allows(self, query: &str) -> bool {
+        match self {
+            Self::NonEmpty => !query.trim().is_empty(),
+            Self::EmptyOnly => query.trim().is_empty(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct CommandSpec {
     id: CommandId,
     pub result_limit: usize,
     pub presentation: QueryPresentation,
     pub deadline: std::time::Duration,
+    pub(crate) query_eligibility: QueryEligibility,
 }
 
 impl CommandSpec {
@@ -74,7 +93,13 @@ impl CommandSpec {
             result_limit,
             presentation,
             deadline: std::time::Duration::from_secs(30),
+            query_eligibility: QueryEligibility::NonEmpty,
         }
+    }
+
+    pub fn with_query_eligibility(mut self, eligibility: QueryEligibility) -> Self {
+        self.query_eligibility = eligibility;
+        self
     }
 }
 

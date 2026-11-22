@@ -17,7 +17,7 @@
 	let searching = $state(false);
 	let selected = $state(0);
 	let actionsOpen = $state(false);
-	const rows = $derived(found ? (shown.steps[found.toLowerCase()] ?? []) : []);
+	const rows = $derived(shown.steps[found.toLowerCase()] ?? []);
 	const stackedResult = $derived(
 		shown.result !== undefined &&
 		([...shown.query].length > 20 || [...shown.result].length > 20),
@@ -130,10 +130,13 @@
 
 	onMount(() => {
 		if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-			// One still search in place of the loop.
+			// Keep the first scenario's empty-query state visible without replaying the typing loop.
 			open = true;
-			query = first.query;
-			found = first.query;
+			shown = first;
+			query = '';
+			found = '';
+			mode = undefined;
+			selected = 0;
 			return;
 		}
 
@@ -193,6 +196,7 @@
 				press('⌘ Space', true);
 				open = true;
 				shownAt = performance.now();
+				// Show the first scenario's Recent rows before typing; other empty modes show their hints.
 				await sleep(1800);
 				keys = [];
 				if (scenario.mode === 'In files') {

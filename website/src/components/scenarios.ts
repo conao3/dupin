@@ -151,7 +151,11 @@ const reading = file('reading-list.md', '~/Notes', 'doc');
 export const scenarios: [Scenario, ...Scenario[]] = [
 	{
 		query: 'cl',
-		steps: { c, cl: [claude, clock, calculator, calendar, console_, colorsync] },
+		steps: {
+			'': [claude, ideas, terminal, invoice10, chatgpt, trip, calendar, meeting],
+			c,
+			cl: [claude, clock, calculator, calendar, console_, colorsync],
+		},
 	},
 	{
 		query: 'codex',

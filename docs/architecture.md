@@ -16,7 +16,9 @@ An `Item` owns the runtime-independent `dupin-plugin-protocol::View`: Text (titl
 
 The host renders each item in declared order. All-text lists retain fixed-height virtualisation; mixed results use a bounded scrolling column with selectable detail/pair cards and stable row/action anchors. Content is plain text.
 
-Registered routes and shared internal views advance the plugin migration. Native providers still call OS APIs directly: the native OS broker, external manifests/packages/runtime integration and plugin grants remain incomplete. The protocol dependency adds no plugin execution runtime to the app.
+Registered routes and shared internal views advance the plugin migration. The optional Wasm backend runs the calculator; Recent is a bundled native provider and remains available without that backend. Both appear in Plugins settings. Native providers still use the existing macOS path actions; their full OS broker migration and external manifests/packages remain incomplete. Calculator copying and Recent's Copy path action use the per-plugin grant broker.
+
+Command metadata declares whether a provider accepts empty or non-empty queries. Recent opts into empty queries; explicit blank Files and Dictionary commands keep their existing hints. The session owns usage history, publishes a snapshot to Recent after recording usage, and refreshes eligible providers when the panel is shown. Merely displaying suggestions does not record a visit, and guest query messages do not receive the history snapshot.
 
 ## Searching off the main thread
 

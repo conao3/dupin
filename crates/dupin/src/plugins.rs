@@ -3,16 +3,15 @@ use std::collections::HashMap;
 use std::io::Read;
 #[cfg(feature = "wasm-runtime")]
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 #[cfg(feature = "wasm-runtime")]
 use std::{sync::OnceLock, time::Instant};
 
 use dupin_core::config::PluginSettings;
-#[cfg(feature = "wasm-runtime")]
 use dupin_core::{Action, Item, ItemAction, ProviderError, Request};
-use dupin_core::{CommandId, Config, Provider};
+use dupin_core::{CommandId, Config, History, Provider, QueryEligibility};
 use dupin_plugin_broker::{PrepareError, PreparedCopy};
 use dupin_plugin_policy::{Access, Capability, PluginHandle, Policy};
 use dupin_plugin_protocol::Operation;
@@ -28,6 +27,18 @@ pub struct CapabilityDescriptor {
     kind: Capability,
 }
 
+enum Backend {
+    Recent,
+    #[cfg(feature = "wasm-runtime")]
+    Guest(Guest),
+}
+
+#[cfg(feature = "wasm-runtime")]
+struct Guest {
+    command: &'static str,
+    module: &'static str,
+}
+
 pub struct Descriptor {
     pub id: &'static str,
     pub title: &'static str,
@@ -35,37 +46,56 @@ pub struct Descriptor {
     pub command: &'static str,
     pub default_enabled: bool,
     pub capabilities: &'static [CapabilityDescriptor],
-    #[cfg(feature = "wasm-runtime")]
-    guest_command: &'static str,
-    #[cfg(feature = "wasm-runtime")]
-    module: &'static str,
+    pub query_eligibility: QueryEligibility,
+    pub limit: usize,
+    pub pinned: bool,
+    backend: Backend,
 }
 
 pub const DEADLINE: Duration = Duration::from_secs(2);
 
-#[cfg(feature = "wasm-runtime")]
 pub fn descriptors() -> &'static [Descriptor] {
-    static PLUGINS: &[Descriptor] = &[Descriptor {
-        id: "calculator",
-        title: "Calculator",
-        description: "Arithmetic and unit conversions alongside app search",
-        command: "calculator.evaluate",
-        default_enabled: true,
-        guest_command: "calculator",
-        module: "calculator.wasm",
-        capabilities: &[CapabilityDescriptor {
-            id: "clipboard-write",
-            title: "Copy results",
-            description: "Allow this plugin to write a result to the clipboard when you choose Copy",
-            kind: Capability::ClipboardWrite,
-        }],
-    }];
+    static PLUGINS: &[Descriptor] = &[
+        #[cfg(feature = "wasm-runtime")]
+        Descriptor {
+            id: "calculator",
+            title: "Calculator",
+            description: "Arithmetic and unit conversions alongside app search",
+            command: "calculator.evaluate",
+            default_enabled: true,
+            query_eligibility: QueryEligibility::NonEmpty,
+            limit: 1,
+            pinned: true,
+            backend: Backend::Guest(Guest {
+                command: "calculator",
+                module: "calculator.wasm",
+            }),
+            capabilities: &[CapabilityDescriptor {
+                id: "clipboard-write",
+                title: "Copy results",
+                description: "Allow this plugin to write a result to the clipboard when you choose Copy",
+                kind: Capability::ClipboardWrite,
+            }],
+        },
+        Descriptor {
+            id: "recent",
+            title: "Recent",
+            description: "Recent and frequent apps and files when the query is empty",
+            command: "recent.items",
+            default_enabled: true,
+            query_eligibility: QueryEligibility::EmptyOnly,
+            limit: 10,
+            pinned: false,
+            backend: Backend::Recent,
+            capabilities: &[CapabilityDescriptor {
+                id: "clipboard-write",
+                title: "Copy paths",
+                description: "Allow this plugin to copy a path when you choose Copy path",
+                kind: Capability::ClipboardWrite,
+            }],
+        },
+    ];
     PLUGINS
-}
-
-#[cfg(not(feature = "wasm-runtime"))]
-pub fn descriptors() -> &'static [Descriptor] {
-    &[]
 }
 
 pub fn settings(config: &Config, plugin: &Descriptor) -> PluginSettings {
@@ -87,10 +117,11 @@ struct Installed {
 pub struct Services {
     policy: Policy,
     installed: HashMap<CommandId, Installed>,
+    history: Arc<RwLock<History>>,
 }
 
 impl Services {
-    pub fn new(config: &Config) -> Self {
+    pub fn new(config: &Config, history: &History) -> Self {
         let mut policy = Policy::default();
         let installed = descriptors()
             .iter()
@@ -105,7 +136,11 @@ impl Services {
                 )
             })
             .collect();
-        let mut services = Self { policy, installed };
+        let mut services = Self {
+            policy,
+            installed,
+            history: Arc::new(RwLock::new(history.clone())),
+        };
         services.apply_config(config);
         services
     }
@@ -126,24 +161,29 @@ impl Services {
         }
     }
 
-    pub fn providers(&self) -> HashMap<CommandId, Arc<dyn Provider>> {
-        #[cfg(not(feature = "wasm-runtime"))]
-        return HashMap::new();
+    pub fn update_history(&self, history: &History) {
+        *self.history.write().unwrap_or_else(|e| e.into_inner()) = history.clone();
+    }
 
-        #[cfg(feature = "wasm-runtime")]
+    pub fn providers(&self, apps: &Arc<dupin_mac::AppsProvider>) -> HashMap<CommandId, Arc<dyn Provider>> {
         descriptors()
             .iter()
             .map(|plugin| {
                 let command = command_id(plugin);
-                let enabled = self.installed[&command].enabled.clone();
-                (
-                    command,
-                    Arc::new(GuestProvider {
+                let provider: Arc<dyn Provider> = match &plugin.backend {
+                    Backend::Recent => Arc::new(CopyBroker {
+                        command: command.clone(),
+                        provider: dupin_mac::RecentProvider::new(apps.clone(), self.history.clone()),
+                    }),
+                    #[cfg(feature = "wasm-runtime")]
+                    Backend::Guest(guest) => Arc::new(GuestProvider {
                         plugin,
-                        enabled,
+                        guest,
+                        enabled: self.installed[&command].enabled.clone(),
                         module: OnceLock::new(),
-                    }) as Arc<dyn Provider>,
-                )
+                    }),
+                };
+                (command, provider)
             })
             .collect()
     }
@@ -159,7 +199,7 @@ impl Services {
         let copy =
             PreparedCopy::prepare(&self.policy, &entry.handle, operation).map_err(|error| match error {
                 PrepareError::Access(Access::NeedsGrant) => {
-                    "Allow this plugin to copy results in Settings → Plugins."
+                    "Allow this plugin to write to the clipboard in Settings → Plugins."
                 }
                 _ => "This action is no longer available.",
             })?;
@@ -172,9 +212,112 @@ pub fn command_id(plugin: &Descriptor) -> CommandId {
     CommandId::new(plugin.command).expect("bundled command IDs are valid")
 }
 
+struct CopyBroker<P> {
+    command: CommandId,
+    provider: P,
+}
+
+impl<P: Provider> Provider for CopyBroker<P> {
+    fn search(&self, request: &Request, emit: &mut dyn FnMut(Vec<Item>)) -> Result<(), ProviderError> {
+        self.provider.search(request, &mut |items| {
+            let items = items
+                .into_iter()
+                .map(|mut item| {
+                    let actions = item
+                        .actions
+                        .iter()
+                        .filter_map(|action| {
+                            let effect = match item.action(&action.id)? {
+                                Action::Copy(text) => Action::Plugin {
+                                    command: self.command.clone(),
+                                    operation: Operation::CopyText { text: text.clone() },
+                                },
+                                effect => effect.clone(),
+                            };
+                            Some(ItemAction::new(&action.id, &action.title, effect))
+                        })
+                        .collect();
+                    item.actions = actions;
+                    item
+                })
+                .collect();
+            emit(items);
+        })
+    }
+}
+
+#[cfg(test)]
+mod native_tests {
+    use super::*;
+
+    struct Paths;
+
+    impl Provider for Paths {
+        fn search(&self, _: &Request, emit: &mut dyn FnMut(Vec<Item>)) -> Result<(), ProviderError> {
+            emit(vec![Item::path(
+                "/fixture/report.txt".into(),
+                "Report".into(),
+                Vec::new(),
+            )]);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn native_copy_actions_require_their_own_plugin_grant() {
+        let plugin = descriptors().iter().find(|p| p.id == "recent").unwrap();
+        let command = command_id(plugin);
+        let provider = CopyBroker {
+            command: command.clone(),
+            provider: Paths,
+        };
+        let mut items = Vec::new();
+        provider
+            .search(&Request::detached("", 10), &mut |batch| items.extend(batch))
+            .unwrap();
+        assert!(matches!(items[0].action("open"), Some(Action::Open(_))));
+        let Some(Action::Plugin {
+            command: origin,
+            operation,
+        }) = items[0].action("copy-path")
+        else {
+            panic!("native copy must use the plugin broker");
+        };
+        assert_eq!(origin, &command);
+        let mut config = Config::default();
+        let mut services = Services::new(&config, &History::default());
+        assert!(
+            services
+                .copy(origin, operation.clone(), || true, |_| panic!("ungranted copy"))
+                .is_err()
+        );
+        config.plugins.insert(
+            plugin.id.into(),
+            PluginSettings {
+                enabled: true,
+                grants: vec!["clipboard-write".into()],
+            },
+        );
+        services.apply_config(&config);
+        let mut copied = String::new();
+        services
+            .copy(origin, operation.clone(), || true, |text| copied = text.into())
+            .unwrap();
+        assert_eq!(copied, "/fixture/report.txt");
+        config.plugins.get_mut(plugin.id).unwrap().enabled = false;
+        services.apply_config(&config);
+        assert!(
+            services
+                .copy(origin, operation.clone(), || true, |_| panic!("disabled copy"))
+                .is_err()
+        );
+    }
+}
+
 #[cfg(feature = "wasm-runtime")]
 struct GuestProvider {
     plugin: &'static Descriptor,
+    guest: &'static Guest,
     enabled: Arc<AtomicBool>,
     module: OnceLock<Result<GuestModule, HostError>>,
 }
@@ -187,14 +330,14 @@ impl Provider for GuestProvider {
         }
         let module = self
             .module
-            .get_or_init(|| load_module(self.plugin))
+            .get_or_init(|| load_module(self.plugin, self.guest))
             .as_ref()
             .map_err(|_| ProviderError)?;
         let message = dupin_plugin_protocol::Request {
             version: VERSION,
             request_id: request.generation().to_string(),
             generation: request.generation().to_string(),
-            command: self.plugin.guest_command.into(),
+            command: self.guest.command.into(),
             query: request.query.clone(),
             limit: request.limit.min(dupin_plugin_protocol::MAX_RESULTS as usize) as u32,
             state: None,
@@ -248,8 +391,8 @@ impl Provider for GuestProvider {
 }
 
 #[cfg(feature = "wasm-runtime")]
-fn load_module(plugin: &Descriptor) -> Result<GuestModule, HostError> {
-    let path = module_path(plugin).ok_or(HostError::InvalidModule)?;
+fn load_module(plugin: &Descriptor, guest: &Guest) -> Result<GuestModule, HostError> {
+    let path = module_path(plugin, guest).ok_or(HostError::InvalidModule)?;
     let file = std::fs::File::open(path).map_err(|_| HostError::InvalidModule)?;
     let mut bytes = Vec::new();
     file.take(MAX_MODULE_BYTES as u64 + 1)
@@ -259,7 +402,7 @@ fn load_module(plugin: &Descriptor) -> Result<GuestModule, HostError> {
 }
 
 #[cfg(feature = "wasm-runtime")]
-fn module_path(plugin: &Descriptor) -> Option<PathBuf> {
+fn module_path(plugin: &Descriptor, guest: &Guest) -> Option<PathBuf> {
     if cfg!(debug_assertions) {
         return Some(
             PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -275,7 +418,7 @@ fn module_path(plugin: &Descriptor) -> Option<PathBuf> {
             .parent()?
             .parent()?
             .join("Resources/plugins")
-            .join(plugin.module),
+            .join(guest.module),
     )
 }
 
@@ -288,7 +431,7 @@ mod tests {
         let mut config = Config::default();
         let plugin = &descriptors()[0];
         let command = command_id(plugin);
-        let mut services = Services::new(&config);
+        let mut services = Services::new(&config, &History::default());
         let operation = || Operation::CopyText { text: "42".into() };
         assert!(
             services
@@ -332,8 +475,13 @@ mod tests {
 
     #[test]
     fn disabled_and_zero_limit_queries_do_not_load_a_module() {
+        let plugin = &descriptors()[0];
+        let Backend::Guest(guest) = &plugin.backend else {
+            panic!("expected calculator guest")
+        };
         let provider = GuestProvider {
-            plugin: &descriptors()[0],
+            plugin,
+            guest,
             enabled: Arc::new(AtomicBool::new(false)),
             module: OnceLock::new(),
         };

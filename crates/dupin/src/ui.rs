@@ -85,7 +85,7 @@ impl Ui {
     ) -> Ui {
         let config = configuration.values.borrow().clone();
         let apps_provider = Arc::new(AppsProvider::standard());
-        let plugins = crate::plugins::Services::new(&config);
+        let plugins = crate::plugins::Services::new(&config, &history);
         let registration = crate::commands::register(&config, apps_provider.clone(), &plugins)
             .expect("built-in command registration is valid");
         let apps_watcher = apps_provider.watch({
@@ -326,6 +326,10 @@ impl Ui {
         self.shown_at = tx.clock();
         self.force_input_source();
         self.me.show();
+        if self.session.query().trim().is_empty() {
+            let effects = self.session.refresh();
+            self.apply(effects, tx);
+        }
     }
 
     fn force_input_source(&mut self) {
@@ -545,7 +549,10 @@ impl Ui {
                 }
                 Effect::ClearQuery => self.query.clear(),
                 Effect::ReplaceQuery(text) => self.query.replace_text(text),
-                Effect::SaveHistory => self.saver.save(self.session.history()),
+                Effect::SaveHistory => {
+                    self.plugins.update_history(self.session.history());
+                    self.saver.save(self.session.history());
+                }
                 Effect::Run(action) => {
                     if let dupin_core::Action::Plugin { command, operation } = action {
                         let key = self

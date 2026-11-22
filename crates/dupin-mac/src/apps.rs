@@ -90,6 +90,13 @@ impl AppsProvider {
         drop(self.apps());
     }
 
+    pub(crate) fn catalog_items(&self) -> HashMap<PathBuf, Item> {
+        self.apps()
+            .into_iter()
+            .map(|app| (app.path.clone(), app.item(Vec::new())))
+            .collect()
+    }
+
     fn apps(&self) -> Vec<App> {
         let mut index = self.index.lock().unwrap_or_else(|e| e.into_inner());
         let revision = self.revision.load(Ordering::Acquire);
@@ -133,6 +140,13 @@ impl Provider for AppsProvider {
 }
 
 impl App {
+    fn item(&self, matched: Vec<usize>) -> Item {
+        Item {
+            icon: Some(self.icon.clone()),
+            ..Item::path(self.path.clone(), self.name.clone(), matched)
+        }
+    }
+
     /// Take the displayed name and the extra names the system reports, keeping the file name
     /// as an alias when it differs. Names lose a trailing `.app`, and duplicates (ignoring
     /// case) and empty names are dropped.
@@ -193,12 +207,11 @@ fn rank(apps: &[App], query: &str, limit: usize) -> Vec<Item> {
     hits.truncate(limit);
     hits.into_iter()
         .map(|(score, alias, positions, app)| {
-            let mut item = Item::path(app.path.clone(), app.name.clone(), positions);
+            let mut item = app.item(positions);
             if let (Some(alias), View::Text { subtitle, .. }) = (alias, &mut item.view) {
                 *subtitle = format!("{alias} · {subtitle}");
             }
             Item {
-                icon: Some(app.icon.clone()),
                 score: Some(score),
                 ..item
             }

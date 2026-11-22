@@ -114,13 +114,16 @@ pub fn configured(config: &Config) -> Result<ConfiguredCommands, dupin_core::Com
         let command = crate::plugins::command_id(plugin);
         let mut spec = CommandSpec::new(
             command.clone(),
-            1,
+            plugin.limit,
             presentation(plugin.title, Some(plugin.title), None, None, false, 0.0),
         );
+        spec = spec.with_query_eligibility(plugin.query_eligibility);
         spec.deadline = crate::plugins::DEADLINE;
         registry.register(spec)?;
         if crate::plugins::settings(config, plugin).enabled {
-            pinned.get_or_insert_with(|| command.clone());
+            if plugin.pinned {
+                pinned.get_or_insert_with(|| command.clone());
+            }
             defaults.push(command);
         }
     }
@@ -139,7 +142,7 @@ pub fn register(
     let contents_id = id(CONTENTS);
     let dictionary_id = id(DICTIONARY);
     let mut providers: HashMap<_, Arc<dyn Provider>> = [
-        (apps_id, apps as Arc<dyn Provider>),
+        (apps_id, apps.clone() as Arc<dyn Provider>),
         (
             files_id,
             Arc::new(SpotlightProvider::new(Target::Names)) as Arc<dyn Provider>,
@@ -154,7 +157,7 @@ pub fn register(
         ),
     ]
     .into();
-    providers.extend(plugins.providers());
+    providers.extend(plugins.providers(&apps));
 
     Ok(Registration {
         registry,
