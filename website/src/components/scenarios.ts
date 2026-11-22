@@ -16,7 +16,9 @@ export type Row = {
 export type Marking = 'letters' | 'run' | 'none';
 
 export type Scenario = {
-	mode?: 'Files' | 'In files';
+	mode?: 'Files' | 'In files' | 'Define';
+	keyword?: string;
+	detail?: string;
 	actions?: boolean;
 	result?: string;
 	query: string;
@@ -51,7 +53,6 @@ const calendar = glyph(
 	'#ff3b30',
 );
 const chatgpt = app('ChatGPT', '/Applications', 'chatgpt');
-const codex = app('ChatGPT', '/Applications', 'chatgpt', { alias: 'Codex' });
 const chess = glyph('Chess', '/System/Applications', 'icon-[ph--horse-fill]', '#8d6e4f');
 const claude = app('Claude', '/Applications', 'claude');
 const clock = app('Clock', '/System/Applications', 'clock');
@@ -73,30 +74,6 @@ const contacts = glyph(
 	'icon-[ph--address-book-fill]',
 	'#a2845e',
 );
-const t3code = app('T3 Code', '/Applications', 't3code');
-const terminal = glyph(
-	'Terminal',
-	'/System/Applications/Utilities',
-	'icon-[ph--terminal-fill]',
-	'#1c1c1e',
-);
-const textedit = glyph(
-	'TextEdit',
-	'/System/Applications',
-	'icon-[ph--note-pencil-fill]',
-	'#8e8e93',
-);
-const tips = glyph('Tips', '/System/Applications', 'icon-[ph--lightbulb-fill]', '#f5b300');
-const tv = glyph('TV', '/System/Applications', 'icon-[ph--television-simple-fill]', '#1c1c1e');
-
-const activity = glyph(
-	'Activity Monitor',
-	'/System/Applications/Utilities',
-	'icon-[ph--pulse-fill]',
-	'#1c1c1e',
-);
-const fontbook = glyph('Font Book', '/System/Applications', 'icon-[ph--text-aa-fill]', '#8e8e93');
-const shortcuts = glyph('Shortcuts', '/System/Applications', 'icon-[ph--stack-fill]', '#e5486b');
 const finder = glyph('Finder', '/System/Library/CoreServices', 'icon-[ph--smiley-fill]', '#1e88f5');
 const imageCapture = glyph(
 	'Image Capture',
@@ -118,6 +95,20 @@ const mission = glyph(
 );
 const music = glyph('Music', '/System/Applications', 'icon-[ph--music-note-fill]', '#fa2d48');
 const itunes = { ...music, alias: 'iTunes' };
+
+const dictionary = glyph('Dictionary', '/System/Applications', 'icon-[ph--book-fill]', '#b91c1c');
+const diskUtility = glyph(
+	'Disk Utility',
+	'/System/Applications/Utilities',
+	'icon-[ph--hard-drive-fill]',
+	'#8e8e93',
+);
+const defaultFolder = glyph(
+	'Default Folder X',
+	'/Applications',
+	'icon-[ph--folder-fill]',
+	'#1e88f5',
+);
 
 const file = (title: string, sub: string, icon: 'pdf' | 'doc' | 'sheet'): Row => ({
 	icon,
@@ -148,29 +139,12 @@ const tah = [trip, booking, packing, budget];
 const meeting = file('meeting-notes.md', '~/Notes', 'doc');
 const reading = file('reading-list.md', '~/Notes', 'doc');
 
-export const scenarios: [Scenario, ...Scenario[]] = [
-	{
+const scenarios = {
+	apps: {
 		query: 'cl',
 		steps: { c, cl: [claude, clock, calculator, calendar, console_, colorsync] },
 	},
-	{
-		query: 'codex',
-		steps: {
-			c,
-			co: [console_, contacts, colorsync, codex, clock, calculator],
-			cod: [codex],
-			code: [codex],
-			codex: [codex],
-		},
-	},
-	{
-		query: 't3',
-		steps: {
-			t: [tv, tips, t3code, terminal, textedit, shortcuts, fontbook, activity],
-			t3: [t3code],
-		},
-	},
-	{
+	files: {
 		mode: 'Files',
 		actions: true,
 		query: 'invoice',
@@ -184,7 +158,7 @@ export const scenarios: [Scenario, ...Scenario[]] = [
 			invoice: invo,
 		},
 	},
-	{
+	contents: {
 		mode: 'In files',
 		query: 'tahoe',
 		steps: {
@@ -198,15 +172,36 @@ export const scenarios: [Scenario, ...Scenario[]] = [
 			tahoe: tah,
 		},
 	},
-	{
+	calculator: {
 		query: '560km to mi',
 		result: 'approx. 347.9678676529 mi',
 		steps: {},
 	},
-];
+} satisfies Record<string, Scenario>;
 
 export const marking = (mode: Scenario['mode']): Marking =>
-	mode === 'Files' ? 'run' : mode === 'In files' ? 'none' : 'letters';
+	mode === 'Files' ? 'run' : mode ? 'none' : 'letters';
+
+export const features = [
+	{ label: 'Apps', scenario: scenarios.apps },
+	{ label: 'Calculator', scenario: scenarios.calculator },
+	{ label: 'Files', scenario: scenarios.files },
+	{ label: 'In files', scenario: scenarios.contents },
+	{
+		label: 'Dictionary',
+		scenario: {
+			mode: 'Define',
+			keyword: 'define',
+			query: 'serendipity',
+			detail: 'The occurrence of events by chance in a happy or beneficial way.',
+			steps: {
+				d: [dictionary, diskUtility, defaultFolder],
+				de: [defaultFolder],
+				def: [defaultFolder],
+			},
+		},
+	},
+] satisfies { label: string; scenario: Scenario }[];
 
 /** `title` split into runs, marking the characters `query` matched as `marking` says. */
 export function marked(
