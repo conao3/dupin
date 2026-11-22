@@ -271,6 +271,7 @@ mod tests {
                 let mut web_items = Vec::new();
                 web.search(&Request::detached(query, 1), &mut |rows| web_items.extend(rows))
                     .unwrap();
+                assert_eq!(web_items.len(), usize::from(query == "pi"));
                 let mut expected = vec![answer.id.clone(), app.id.clone()];
                 if let Some(web_item) = web_items.first() {
                     expected.insert(0, web_item.id.clone());
