@@ -1,0 +1,38 @@
+{
+	"schema_version": 2,
+	"id": "maps",
+	"title": "Maps/Places",
+	"description": "Hand address and place searches to Maps",
+	"plugin_version": "1",
+	"command": "maps.search",
+	"entrypoint": "search",
+	"eligibility": "nonempty",
+	"result_limit": 1,
+	"default_enabled": false,
+	"capabilities": [
+		{
+			"id": "open-url:maps:",
+			"title": "Search in Maps",
+			"description": "Open your entered address or place in Maps",
+			"kind": {
+				"open-url": {
+					"scheme": "maps",
+					"host": null
+				}
+			}
+		}
+	],
+	"views": ["text"],
+	"actions": ["open_url"],
+	"routing": {
+		"kind": "keyword",
+		"aliases": ["maps", "map"],
+		"placeholder": "Search an address or place",
+		"chip": "Maps",
+		"empty_hint": "Type an address or place",
+		"no_results_hint": "No Maps search available",
+		"show_searching": false,
+		"backdrop": 3,
+		"deadline_seconds": 30
+	}
+}

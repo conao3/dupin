@@ -456,6 +456,51 @@ mod tests {
     }
 
     #[test]
+    fn maps_is_keyword_only_and_omitted_without_wasm() {
+        use dupin_core::{Effect, History, Session};
+        let mut config = Config::default();
+        let maps = id("maps.search");
+        for enabled in [false, true] {
+            config.plugins.insert(
+                "maps".into(),
+                dupin_core::config::PluginSettings {
+                    enabled,
+                    grants: vec![],
+                },
+            );
+            let commands = configured(&config).unwrap();
+            for alias in ["maps", "map"] {
+                assert_eq!(
+                    commands.registry.keyword(alias),
+                    if cfg!(feature = "wasm-runtime") {
+                        Some(&maps)
+                    } else {
+                        None
+                    }
+                );
+            }
+            let mut session = Session::new(History::default(), commands.registry).unwrap();
+            assert!(
+                !session.set_query("London").iter().any(
+                    |e| matches!(e, Effect::Search { command, .. } if command.as_str() == "maps.search")
+                )
+            );
+            if cfg!(feature = "wasm-runtime") {
+                let spec = session.provider_spec(&id("maps.search")).unwrap();
+                assert_eq!(spec.result_limit, 1);
+                assert_eq!(
+                    spec.presentation.no_results_hint.as_deref(),
+                    Some(if enabled {
+                        "No Maps search available"
+                    } else {
+                        "Enable Maps/Places in Settings → Plugins."
+                    })
+                );
+            }
+        }
+    }
+
+    #[test]
     fn keyword_plugins_preserve_routes_and_reload_presentation_without_default_search() {
         use dupin_core::{Effect, History, Session};
         let mut config = Config::default();

@@ -5,7 +5,7 @@
   python3Packages,
   inter,
   stdenvNoCC,
-  calculatorPlugin,
+  guestPlugins,
   withWasm ? true,
 }:
 let
@@ -144,7 +144,10 @@ let
         chmod -R u+w $out/Applications/Dupin.app
         ${lib.optionalString withWasm ''
           mkdir -p $out/Applications/Dupin.app/Contents/Resources/plugins
-          cp ${calculatorPlugin}/share/dupin/plugins/calculator.wasm $out/Applications/Dupin.app/Contents/Resources/plugins/calculator.wasm
+          ${lib.concatMapStringsSep "\n" (
+            plugin:
+            "cp ${plugin}/share/dupin/plugins/*.wasm $out/Applications/Dupin.app/Contents/Resources/plugins/"
+          ) guestPlugins}
         ''}
         ln -s $out/Applications/Dupin.app/Contents/MacOS/dupin $out/bin/dupin
       '';

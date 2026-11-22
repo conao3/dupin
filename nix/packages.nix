@@ -5,13 +5,19 @@
     let
       blacksmith = pkgs.callPackage ./blacksmith.nix { };
       calculator-plugin = pkgs.callPackage ./calculator-plugin.nix { };
+      maps-plugin = pkgs.callPackage ./maps-plugin.nix { };
       currency-guest = pkgs.callPackage ./currency-guest.nix { };
       minimal-plugin = pkgs.runCommand "dupin-minimal-plugin" { nativeBuildInputs = [ pkgs.wabt ]; } ''
         mkdir -p $out/share/dupin/plugins
         wat2wasm ${../experiments/wasm-app-size/minimal-plugin.wat} \
           -o $out/share/dupin/plugins/minimal.wasm
       '';
-      native = pkgs.callPackage ../package.nix { calculatorPlugin = calculator-plugin; };
+      native = pkgs.callPackage ../package.nix {
+        guestPlugins = [
+          calculator-plugin
+          maps-plugin
+        ];
+      };
       cached =
         baseline:
         import ./cargo-artifacts.nix {
@@ -44,6 +50,7 @@
           blacksmith
           dmg-background
           calculator-plugin
+          maps-plugin
           currency-guest
           minimal-plugin
           ;

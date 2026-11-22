@@ -57,6 +57,12 @@ pub fn descriptors() -> &'static [Descriptor] {
                     module: "calculator.wasm",
                 },
             },
+            #[cfg(feature = "wasm-runtime")]
+            Descriptor {
+                manifest: Manifest::decode(include_bytes!("maps-manifest.json"))
+                    .expect("valid maps manifest"),
+                backend: Backend::Guest { module: "maps.wasm" },
+            },
             Descriptor {
                 manifest: Manifest::decode(include_bytes!("dictionary-manifest.json"))
                     .expect("valid dictionary manifest"),
@@ -438,6 +444,111 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires DUPIN_TEST_MAPS_MODULE pointing to the compiled Maps guest"]
+    fn compiled_maps_guest_uses_the_shared_provider() {
+        let plugin = descriptors().iter().find(|p| p.id == "maps").unwrap();
+        let bytes = std::fs::read(std::env::var("DUPIN_TEST_MAPS_MODULE").unwrap()).unwrap();
+        let module = GuestModule::load(&bytes).unwrap();
+        let provider = GuestProvider {
+            plugin,
+            enabled: Arc::new(AtomicBool::new(true)),
+            module: OnceLock::from(Ok(module)),
+        };
+        let mut rows = Vec::new();
+        provider
+            .search(&Request::detached("  London & 東京  ", 10), &mut |batch| {
+                rows.extend(batch)
+            })
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert!(!rows[0].record_usage);
+        assert!(rows[0].completion.is_none());
+        assert_eq!(rows[0].primary.as_deref(), Some("open-maps"));
+        assert_eq!(rows[0].actions[0].id, "open-maps");
+        assert_eq!(rows[0].actions[0].title, "Search in Maps");
+    }
+
+    #[test]
+    fn maps_grants_are_separate_revocable_and_stale_safe() {
+        let mut config = Config::default();
+        let plugin = descriptors().iter().find(|p| p.id == "maps").unwrap();
+        assert!(!plugin.default_enabled);
+        assert_eq!(plugin.result_limit, 1);
+        assert!(plugin.allows_view(&dupin_plugin_protocol::View::Text {
+            title: "London".into(),
+            subtitle: "Search in Maps".into()
+        }));
+        let command = CommandId::new("maps.search").unwrap();
+        let operation = || Operation::OpenUrl {
+            url: "maps://?q=London".into(),
+        };
+        let mut services = Services::new(&config);
+        assert!(services.prepare(&command, operation()).is_err());
+        config.plugins.insert(
+            "maps".into(),
+            PluginSettings {
+                enabled: true,
+                grants: vec![],
+            },
+        );
+        services.apply_config(&config);
+        assert!(services.prepare(&command, operation()).is_err());
+        config
+            .plugins
+            .get_mut("maps")
+            .unwrap()
+            .grants
+            .push("open-url:maps:".into());
+        services.apply_config(&config);
+        let prepared = services.prepare(&command, operation()).unwrap();
+        let mut opened = None;
+        prepared
+            .dispatch(&services.policy.lock().unwrap(), || true, |op| opened = Some(op))
+            .unwrap();
+        assert_eq!(opened, Some(operation()));
+        let stale_query = services.prepare(&command, operation()).unwrap();
+        assert!(
+            stale_query
+                .dispatch(
+                    &services.policy.lock().unwrap(),
+                    || false,
+                    |_| panic!("stale query")
+                )
+                .is_err()
+        );
+        let revoked = services.prepare(&command, operation()).unwrap();
+        let stale_grant = services.prepare(&command, operation()).unwrap();
+        config.plugins.get_mut("maps").unwrap().grants.clear();
+        services.apply_config(&config);
+        assert!(
+            revoked
+                .dispatch(&services.policy.lock().unwrap(), || true, |_| panic!("revoked"))
+                .is_err()
+        );
+        config
+            .plugins
+            .get_mut("maps")
+            .unwrap()
+            .grants
+            .push("open-url:maps:".into());
+        services.apply_config(&config);
+        assert!(
+            stale_grant
+                .dispatch(
+                    &services.policy.lock().unwrap(),
+                    || true,
+                    |_| panic!("stale grant")
+                )
+                .is_err()
+        );
+        assert!(
+            services
+                .prepare(&CommandId::new("calculator.evaluate").unwrap(), operation())
+                .is_err()
+        );
+    }
+
+    #[test]
     fn copying_requires_an_explicit_grant_and_enablement() {
         let mut config = Config::default();
         let plugin = &descriptors()[0];
@@ -731,7 +842,7 @@ mod manifest_tests {
     #[test]
     fn registration_defaults_and_limits_match_both_builds() {
         let plugins = descriptors();
-        assert_eq!(plugins.len(), if cfg!(feature = "wasm-runtime") { 3 } else { 2 });
+        assert_eq!(plugins.len(), if cfg!(feature = "wasm-runtime") { 4 } else { 2 });
         let system = plugins.iter().find(|p| p.id == "system").unwrap();
         assert!(!settings(&Config::default(), system).enabled);
         assert_eq!(system.result_limit, 2);
