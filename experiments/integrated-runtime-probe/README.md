@@ -21,3 +21,12 @@ The exact fixture request is read from `experiments/currency-guest/fixtures/requ
 The optional third path is a minimal ABI-compatible guest that returns a valid empty protocol result. Its size helps estimate the runtime's minimum usable guest overhead; omitting the path skips this check.
 
 These measurements cover the runtime and guest query boundary. They do not measure Dupin process startup, the rendered interface, macOS services, actual clipboard writes, or process memory. The currency guest is a test fixture and is not registered as a Dupin feature.
+
+[The recorded Apple silicon run](results/2026-11-22-aarch64-darwin.json) uses
+the exact three guest artifacts from the
+[integrated package measurement](../wasm-app-size/results/2026-11-22-integrated-aarch64-darwin.json).
+Its metadata records their hashes, the probe and evaluator source hashes, the
+toolchain and the source commit. Every native/Wasm response matched, the minimal
+guest returned a valid empty response, and both real-budget fuel exhaustion and
+cancellation during a query passed. These are small fixed-workload samples,
+not application-startup or idle-memory benchmarks.

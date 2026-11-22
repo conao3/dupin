@@ -122,3 +122,32 @@ This gate measures package footprint only. It does not launch the app, execute
 the guest, benchmark queries, measure cancellation or memory, or prove runtime
 adoption. Ad-hoc signing checks hardened-runtime compatibility without
 additional entitlements, Developer ID signing, notarisation, or stapling.
+
+### Integrated run, 22 November 2026
+
+[Recorded results](results/2026-11-22-integrated-aarch64-darwin.json) use
+`c4eb6dad773b949b7d7a778965c74e56b04f8ee1`, a clean source snapshot on
+Apple silicon. Sizes are bytes; app totals include regular files after signing.
+
+| Variant                                  | Stripped executable | Signed app | Updater ZIP |
+| ---------------------------------------- | ------------------: | ---------: | ----------: |
+| Native only                              |          18,553,696 | 18,588,005 |   9,631,779 |
+| Runtime, no guests                       |          19,845,568 | 19,872,357 |  10,104,971 |
+| Runtime, minimal ABI guest               |          19,845,568 | 19,872,927 |  10,106,579 |
+| Runtime and calculator                   |          19,845,568 | 20,756,300 |  10,411,745 |
+| Runtime, calculator and currency fixture |          19,845,568 | 21,624,356 |  10,714,973 |
+
+The proposed calculator build adds 2,168,295 app bytes and 779,966 ZIP bytes
+against the same-source native-only build. Adding the second realistic guest
+adds another 868,056 app bytes and 303,228 ZIP bytes. Both guests contain their
+own evaluator and serialization code; the second-guest case counts that
+duplication rather than assuming a shared guest library.
+
+All signed variants passed strict verification with hardened runtime and no
+additional entitlements. Artifact paths in the record are relative to the run
+directory; the app and ZIP files themselves are not committed.
+
+The [current execution probe](../integrated-runtime-probe/README.md) checks these
+exact packaged guests against their native implementations. Package size and
+query evidence do not complete adoption: paired app startup and idle-memory
+measurements remain outstanding.
