@@ -10,6 +10,7 @@ license.workspace = true
 
 [dependencies]
 dupin-plugin-protocol = { workspace = true }
+# Preserve the portable dispatch fallback when LLVM cannot guarantee tail calls.
 wasmi = { version = "=2.0.2", default-features = false, features = [
 	"std",
 	"validate",
