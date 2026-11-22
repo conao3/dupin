@@ -96,7 +96,7 @@ fn complete_input(input: &str) -> bool {
                 continue;
             }
         }
-        if matches!(c, '\'' | '"') && !after_number && !matches!(word.as_str(), "to" | "in") {
+        if matches!(c, '\'' | '"') && !after_number && !matches!(word.as_str(), "to" | "in" | "as") {
             let mut closed = false;
             while let Some(next) = chars.next() {
                 if next == '\\' {
@@ -287,6 +287,15 @@ mod tests {
         }
         assert!(complete_input("1m to '"));
         assert!(calculate("2^60000").is_empty());
+    }
+
+    #[test]
+    fn quoted_units_accept_each_conversion_keyword() {
+        let expected = calculate("1m to '");
+        assert!(!expected.is_empty());
+        for keyword in ["to", "in", "as"] {
+            assert_eq!(calculate(&format!("1m {keyword} '")), expected);
+        }
     }
 
     fn request(query: &str) -> Request {
