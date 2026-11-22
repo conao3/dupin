@@ -50,12 +50,16 @@ export def parse-ready-line [line: string]: nothing -> record {
     }
 }
 
+export def ready-marker-text [contents: string]: nothing -> any {
+    let lines = $contents | split row "\n" | drop | where { str starts-with $READY_PREFIX }
+    if ($lines | is-empty) { null } else { parse-ready-line ($lines | last) }
+}
+
 def ready-marker [log: path]: nothing -> any {
     if not ($log | path exists) {
         return null
     }
-    let lines = open --raw $log | lines | where { str starts-with $READY_PREFIX }
-    if ($lines | is-empty) { null } else { parse-ready-line ($lines | last) }
+    ready-marker-text (open --raw $log)
 }
 
 def wait-ready [log: path, timeout: duration]: nothing -> any {
