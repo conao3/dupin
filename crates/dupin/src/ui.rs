@@ -66,12 +66,12 @@ enum ActionKey {
 }
 
 impl ActionScreen {
-    fn key(&mut self, key: &Key) -> ActionKey {
+    fn key(&mut self, key: &Key, repeat: bool) -> ActionKey {
         match key {
             Key::Up => self.selected = self.selected.saturating_sub(1),
             Key::Down => self.selected = (self.selected + 1).min(self.item.actions.len().saturating_sub(1)),
             Key::Left | Key::Escape => return ActionKey::Back,
-            Key::Enter => {
+            Key::Enter if !repeat => {
                 if let Some(action) = self.item.actions.get(self.selected) {
                     return ActionKey::Run(self.key.clone(), action.id.clone());
                 }
@@ -517,7 +517,7 @@ impl Ui {
             _ => {}
         }
         if let Some(screen) = &mut self.action_screen {
-            match screen.key(&ev.key) {
+            match screen.key(&ev.key, tx.key_repeat()) {
                 ActionKey::Back => {
                     self.action_screen = None;
                     tx.focus("query", false);
@@ -1031,18 +1031,26 @@ mod action_screen_tests {
     #[test]
     fn keyboard_navigation_is_bounded_and_runs_the_captured_key() {
         let (_, mut screen) = fixture();
-        screen.key(&Key::Up);
+        screen.key(&Key::Up, false);
         assert_eq!(screen.selected, 0);
         for _ in 0..10 {
-            screen.key(&Key::Down);
+            screen.key(&Key::Down, false);
         }
         assert_eq!(screen.selected, 2);
-        screen.key(&Key::Up);
+        screen.key(&Key::Up, false);
         assert_eq!(
-            screen.key(&Key::Enter),
+            screen.key(&Key::Enter, false),
             ActionKey::Run(screen.key.clone(), "reveal".into())
         );
-        assert_eq!(screen.key(&Key::Text("x".into())), ActionKey::Stay);
+        assert_eq!(screen.key(&Key::Text("x".into()), false), ActionKey::Stay);
+    }
+
+    #[test]
+    fn repeated_enter_does_not_confirm_an_action() {
+        let (_, mut screen) = fixture();
+        assert_eq!(screen.key(&Key::Enter, true), ActionKey::Stay);
+        assert_eq!(screen.selected, 0);
+        assert!(matches!(screen.key(&Key::Enter, false), ActionKey::Run(_, _)));
     }
 
     #[test]
@@ -1054,7 +1062,7 @@ mod action_screen_tests {
             session.result_key(0),
         );
         for key in [Key::Left, Key::Escape] {
-            assert_eq!(screen.key(&key), ActionKey::Back);
+            assert_eq!(screen.key(&key, false), ActionKey::Back);
             assert_eq!(
                 (
                     session.query().to_owned(),
@@ -1085,7 +1093,7 @@ mod action_screen_tests {
     fn enter_uses_the_selected_action_without_running_external_effects() {
         let (mut session, mut screen) = fixture();
         screen.selected = 2;
-        let ActionKey::Run(key, action) = screen.key(&Key::Enter) else {
+        let ActionKey::Run(key, action) = screen.key(&Key::Enter, false) else {
             panic!("expected action")
         };
         let effects = session.run_key_action(&key, &action);
