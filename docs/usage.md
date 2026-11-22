@@ -87,6 +87,8 @@ screen and returns to the exact search and selection. Use ↑ and ↓ to select 
 
 `define` or `d` followed by Space switches to Dictionary Services ("Define"). Type a word to see its definition from the dictionaries enabled in Dictionary.app. Right Arrow, Cmd+K, Enter or the Actions link opens its action screen; choose Open in Dictionary to launch the external app. Backspace on an empty query returns to app search. Set `dictionary_keywords` in [configuration](./configuration.md) to choose other aliases.
 
+Dictionary is disabled by default. Enable Dictionary in Settings → Plugins to use its keyword lookups. Grant **Open in Dictionary** separately to use that action; enabling lookup does not grant URL access.
+
 Arithmetic and local unit conversions appear as a source/result card alongside
 app search; no keyword is needed. Enter copies the result only after **Copy
 results** has been granted in Settings → Plugins → Calculator. Without that
@@ -94,5 +96,3 @@ grant, the query remains in place and the panel explains where to enable copying
 Currency conversion is not available in the launcher yet.
 
 You can also paste a complete query such as `in release notes` or `d serendipity` into app search. Dupin accepts the same keywords and configured aliases, switches mode, and leaves the search term in the input.
-
-Dictionary is disabled by default. Enable Dictionary in Settings → Plugins to use its keyword lookups. Grant **Open in Dictionary** separately to use that action; enabling lookup does not grant URL access.
