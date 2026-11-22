@@ -153,3 +153,9 @@ The [current execution probe](../integrated-runtime-probe/README.md) checks thes
 exact packaged guests against their native implementations. Package size and
 query evidence do not complete adoption: paired app startup and idle-memory
 measurements remain outstanding.
+
+The [remapped-guest rerun](results/2026-11-22-integrated-remapped-aarch64-darwin.json)
+records the same five package variants after removing temporary vendor paths
+from both standalone guests. Both guest packages passed a repeated Nix build
+with identical bytes. The earlier records retain their original source and
+artifact hashes.
