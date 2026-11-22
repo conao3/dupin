@@ -236,6 +236,7 @@ impl Provider for GuestProvider {
                             )
                         })
                         .collect(),
+                    completion: None,
                     record_usage: false,
                     icon: None,
                     matched: Vec::new(),

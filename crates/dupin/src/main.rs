@@ -15,6 +15,7 @@ mod trace;
 mod ui;
 mod update;
 mod view;
+mod web;
 
 use std::cell::RefCell;
 use std::rc::Rc;

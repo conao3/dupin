@@ -17,6 +17,8 @@ pub enum Intent {
     Backspace,
     Up,
     Down,
+    /// Complete the selected result into the query field.
+    Complete,
     /// Enter.
     Open,
     /// ⌘Enter.
@@ -95,6 +97,7 @@ struct ProviderState {
     items: Vec<Item>,
     ids: HashSet<String>,
     phase: ProviderPhase,
+    fallback: bool,
     candidate_limit: usize,
     result_limit: usize,
 }
@@ -284,7 +287,7 @@ impl Session {
                 .all(|ch| previous.by_ref().any(|before| before == ch));
         if deletion {
             if !self.deleting {
-                self.before_deletion = (self.results == Results::Done).then(|| self.query.trim().to_owned());
+                self.before_deletion = (self.results == Results::Done).then(|| self.query.clone());
                 self.deleting = true;
             }
         } else {
@@ -342,6 +345,19 @@ impl Session {
         let empty = self.query.is_empty();
         Some(match intent {
             Intent::Actions => self.actions(),
+            Intent::Complete => {
+                let completion = self.actionable_items().get(self.selected)?.completion.clone()?;
+                let mut effects = self.set_query(&completion);
+                if let Some(Effect::ReplaceQuery(text)) = effects
+                    .iter_mut()
+                    .find(|effect| matches!(effect, Effect::ReplaceQuery(_)))
+                {
+                    *text = self.query.clone();
+                } else {
+                    effects.insert(0, Effect::ReplaceQuery(self.query.clone()));
+                }
+                effects
+            }
             Intent::Space if empty => self
                 .commands
                 .space_on_empty(&self.command)
@@ -467,7 +483,8 @@ impl Session {
         if !self.pending(&origin, delivery.generation()) {
             return false;
         }
-        let selected = if matches!(self.results, Results::Searching { replaced: true }) {
+        let selected = if self.selection_held && matches!(self.results, Results::Searching { replaced: true })
+        {
             self.items
                 .get(self.selected)
                 .map(|item| (self.origins[self.selected].clone(), item.id.clone()))
@@ -499,27 +516,57 @@ impl Session {
             }
         }
         let pending = self.providers.values().any(|s| s.phase == ProviderPhase::Pending);
-        self.items.clear();
-        self.origins.clear();
+        let show_fallback = self
+            .providers
+            .values()
+            .filter(|state| !state.fallback)
+            .all(|state| state.phase != ProviderPhase::Pending && state.items.is_empty());
+        let mut items = Vec::new();
+        let mut origins = Vec::new();
         let mut order = self.active_order.clone();
         if let Some(pin) = &self.active_pin {
             order.sort_by_key(|id| id != pin);
         }
         for id in order {
             let state = &self.providers[&id];
+            if state.fallback && !show_fallback {
+                continue;
+            }
             let count = if self.active_pin.as_ref() == Some(&id) {
                 state.result_limit.min(1)
             } else {
                 state.result_limit
             };
             for item in state.items.iter().take(count) {
-                if self.items.len() >= self.active_limit {
+                if items.len() >= self.active_limit {
                     break;
                 }
-                self.items.push(item.clone());
-                self.origins.push(id.clone());
+                items.push(item.clone());
+                origins.push(id.clone());
             }
         }
+        if items.is_empty() && pending && matches!(self.results, Results::Searching { replaced: false }) {
+            let previous_items = std::mem::take(&mut self.items);
+            let previous_origins = std::mem::take(&mut self.origins);
+            let previous_selection = self.selected;
+            self.selected = 0;
+            for (index, (item, origin)) in previous_items.into_iter().zip(previous_origins).enumerate() {
+                if self
+                    .providers
+                    .get(&origin)
+                    .is_some_and(|state| state.phase == ProviderPhase::Pending)
+                {
+                    if index == previous_selection {
+                        self.selected = self.items.len();
+                    }
+                    self.items.push(item);
+                    self.origins.push(origin);
+                }
+            }
+            return true;
+        }
+        self.items = items;
+        self.origins = origins;
         let selection = self.refresh_selection.clone().or(selected);
         // A chosen result must remain actionable when newer candidates fill the visible slots.
         if self.selection_held
@@ -530,6 +577,7 @@ impl Session {
                 .enumerate()
                 .any(|(i, item)| item.id == *id && self.origins[i] == *origin)
             && let Some(state) = self.providers.get(origin)
+            && (!state.fallback || show_fallback)
             && let Some(item) = state.items.iter().find(|item| item.id == *id).cloned()
         {
             let provider_limit = if self.active_pin.as_ref() == Some(origin) {
@@ -600,8 +648,8 @@ impl Session {
             self.record_query(query);
             return;
         }
-        let query = self.query.trim();
-        if (!activated && self.results != Results::Done) || query.is_empty() {
+        let query = &self.query;
+        if (!activated && self.results != Results::Done) || query.trim().is_empty() {
             return;
         }
         self.record_query(query.to_owned());
@@ -663,7 +711,7 @@ impl Session {
                 Vec::new()
             };
         }
-        let query = query.to_owned();
+        let query = self.query.clone();
         self.generation += 1;
         // A command change clears the previous command's rows before starting a search.
         self.results = Results::Searching { replaced: false };
@@ -680,6 +728,7 @@ impl Session {
                         items: Vec::new(),
                         ids: HashSet::new(),
                         phase: ProviderPhase::Pending,
+                        fallback: !self.explicit && self.commands.command(&id).unwrap().is_fallback(),
                         candidate_limit: self.commands.command(&id).unwrap().candidate_limit(),
                         result_limit: self.commands.command(&id).unwrap().result_limit,
                     },
