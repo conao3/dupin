@@ -4,6 +4,8 @@
   resvg,
   python3Packages,
   inter,
+  stdenvNoCC,
+  calculatorPlugin,
 }:
 let
   root = ./.;
@@ -44,58 +46,75 @@ let
     pname = "dupin";
     inherit version src cargoDeps;
   };
-in
-rustPlatform.buildRustPackage (
-  commonArgs
-  // {
-    cargoBuildFlags = [
-      "--package"
-      "dupin"
-    ];
-    # Tests run in the lint-and-test check, in debug as cargo runs them.
-    doCheck = false;
-    # The app icon is drawn from the logo here, so no generated image is committed. iconutil
-    # ships only with macOS, outside the sandbox; icnsutil writes the same icns.
-    nativeBuildInputs = [
-      resvg
-      python3Packages.icnsutil
-    ];
-    # cargoBuildHook overrides the profile's `strip` and leaves stripping to stdenv, whose
-    # default flags include `-p`, which llvm-strip rejects for Mach-O; the hook ignores the
-    # failure and leaves every symbol in place.
-    stripAllList = [ "Applications/Dupin.app/Contents/MacOS" ];
-    stripAllFlags = [ "--strip-all" ];
-    postInstall = ''
-      app=$out/Applications/Dupin.app/Contents
-      mkdir -p $app/MacOS
-      mv $out/bin/dupin $app/MacOS/dupin
-      substitute packaging/Info.plist $app/Info.plist --subst-var-by version ${version}
+  nativeApplication = rustPlatform.buildRustPackage (
+    commonArgs
+    // {
+      cargoBuildFlags = [
+        "--package"
+        "dupin"
+      ];
+      # Tests run in the lint-and-test check, in debug as cargo runs them.
+      doCheck = false;
+      # The app icon is drawn from the logo here, so no generated image is committed. iconutil
+      # ships only with macOS, outside the sandbox; icnsutil writes the same icns.
+      nativeBuildInputs = [
+        resvg
+        python3Packages.icnsutil
+      ];
+      # cargoBuildHook overrides the profile's `strip` and leaves stripping to stdenv, whose
+      # default flags include `-p`, which llvm-strip rejects for Mach-O; the hook ignores the
+      # failure and leaves every symbol in place.
+      stripAllList = [ "Applications/Dupin.app/Contents/MacOS" ];
+      stripAllFlags = [ "--strip-all" ];
+      postInstall = ''
+        app=$out/Applications/Dupin.app/Contents
+        mkdir -p $app/MacOS
+        mv $out/bin/dupin $app/MacOS/dupin
+        substitute packaging/Info.plist $app/Info.plist --subst-var-by version ${version}
 
-      # Every size an iconset has: 16 to 512 points, each also at 2x (up to 1024 pixels). The
-      # nightly icon's ribbon is text, and the sandbox has no system fonts.
-      icns() {
-        local iconset
-        iconset=$(mktemp -d)
-        for size in 16 32 128 256 512; do
-          resvg --skip-system-fonts --use-fonts-dir ${inter}/share/fonts -w $size -h $size "$1" $iconset/icon_''${size}x''${size}.png
-          resvg --skip-system-fonts --use-fonts-dir ${inter}/share/fonts -w $((size * 2)) -h $((size * 2)) "$1" $iconset/icon_''${size}x''${size}@2x.png
-        done
-        icnsutil compose --toc "$2" $iconset/*.png
-        icnsutil test "$2"
-      }
-      mkdir -p $app/Resources
-      icns assets/logo/dupin.svg $app/Resources/dupin.icns
-      # scripts/package-app.nu points a nightly build at this one.
-      icns packaging/nightly-icon.svg $app/Resources/dupin-nightly.icns
-      ln -s $app/MacOS/dupin $out/bin/dupin
-    '';
-    passthru = { inherit commonArgs; };
-    meta = {
-      description = "A lightweight resident launcher for Apple silicon Macs";
-      homepage = "https://dupin.app";
-      license = lib.licenses.gpl3Plus;
-      mainProgram = "dupin";
-      platforms = [ "aarch64-darwin" ];
-    };
-  }
-)
+        # Every size an iconset has: 16 to 512 points, each also at 2x (up to 1024 pixels). The
+        # nightly icon's ribbon is text, and the sandbox has no system fonts.
+        icns() {
+          local iconset
+          iconset=$(mktemp -d)
+          for size in 16 32 128 256 512; do
+            resvg --skip-system-fonts --use-fonts-dir ${inter}/share/fonts -w $size -h $size "$1" $iconset/icon_''${size}x''${size}.png
+            resvg --skip-system-fonts --use-fonts-dir ${inter}/share/fonts -w $((size * 2)) -h $((size * 2)) "$1" $iconset/icon_''${size}x''${size}@2x.png
+          done
+          icnsutil compose --toc "$2" $iconset/*.png
+          icnsutil test "$2"
+        }
+        mkdir -p $app/Resources
+        icns assets/logo/dupin.svg $app/Resources/dupin.icns
+        # scripts/package-app.nu points a nightly build at this one.
+        icns packaging/nightly-icon.svg $app/Resources/dupin-nightly.icns
+        ln -s $app/MacOS/dupin $out/bin/dupin
+      '';
+      passthru = { inherit commonArgs; };
+      meta = {
+        description = "A lightweight resident launcher for Apple silicon Macs";
+        homepage = "https://dupin.app";
+        license = lib.licenses.gpl3Plus;
+        mainProgram = "dupin";
+        platforms = [ "aarch64-darwin" ];
+      };
+    }
+  );
+in
+stdenvNoCC.mkDerivation {
+  pname = "dupin";
+  inherit version src;
+  dontUnpack = true;
+  dontBuild = true;
+  dontFixup = true;
+  installPhase = ''
+    mkdir -p $out/Applications $out/bin
+    cp -R ${nativeApplication}/Applications/Dupin.app $out/Applications/Dupin.app
+    chmod -R u+w $out/Applications/Dupin.app
+    mkdir -p $out/Applications/Dupin.app/Contents/Resources/plugins
+    cp ${calculatorPlugin}/share/dupin/plugins/calculator.wasm $out/Applications/Dupin.app/Contents/Resources/plugins/calculator.wasm
+    ln -s $out/Applications/Dupin.app/Contents/MacOS/dupin $out/bin/dupin
+  '';
+  passthru = { inherit commonArgs cargoDeps nativeApplication; };
+  inherit (nativeApplication) meta;
+}

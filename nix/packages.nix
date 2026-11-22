@@ -2,7 +2,8 @@
   perSystem =
     { pkgs, ... }:
     let
-      dupin = pkgs.callPackage ../package.nix { };
+      calculator-plugin = pkgs.callPackage ./calculator-plugin.nix { };
+      dupin = pkgs.callPackage ../package.nix { calculatorPlugin = calculator-plugin; };
       # scripts/package-app.nu lays out Dupin.dmg over this.
       dmg-background =
         pkgs.runCommand "dupin-dmg-background"
@@ -20,7 +21,7 @@
     in
     {
       packages = {
-        inherit dupin dmg-background;
+        inherit dupin dmg-background calculator-plugin;
         default = dupin;
       };
     };
