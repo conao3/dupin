@@ -27,6 +27,7 @@ fn response() -> Response {
                     source: "1+2".into(),
                     result: "3".into(),
                 },
+                primary: None,
                 actions: vec![],
             }],
             state: None,

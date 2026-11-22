@@ -11,7 +11,7 @@ through actual Wasm memory rather than passing native Rust objects across an ABI
 
 ## Messages
 
-Messages are UTF-8 JSON with `version: 1`. Unknown versions, fields, view kinds
+Messages are UTF-8 JSON with `version: 2`. Unknown versions, fields, view kinds
 and error codes are rejected. Request IDs and generations are opaque strings,
 so authors do not need JSON numbers to represent a host's full-width counters.
 
@@ -24,10 +24,20 @@ contains an `outcome` tagged by `kind`:
 
 Items have a stable ID, a view and action descriptors. View kinds are `text`
 (title and subtitle), `detail` (title and body), and `pair` (source and result).
-A text subtitle may be empty. Action descriptors contain only an ID and title;
-they cannot carry executable code, native UI objects or arbitrary OS operations.
-This first query fixture emits no actions because action invocation is not yet
-implemented.
+A text subtitle may be empty. Items also declare a nullable `primary` action ID
+for Enter. A non-null ID must resolve to one of that item's actions; null leaves
+selection of an action to the host menu.
+
+Actions contain an ID, title and a typed `operation`. The only current operation
+is `copy_text`, with a non-empty bounded `text` value. No executable code, native
+UI objects or arbitrary OS operations are accepted. The host must check the
+plugin's declared and granted clipboard-write capability at invocation time;
+displaying the action or pressing Enter does not create a grant. Protocol
+validation alone never executes an operation. The fixture still emits no actions
+until broker and launcher integration are connected.
+
+Version 2 replaces version 1's label-only action descriptors; old wire messages
+are rejected explicitly. The private memory ABI remains version 1.
 
 The host checks request/response correlation and result count after decoding.
 Item IDs must be unique within a response; action IDs must be unique within an
@@ -48,6 +58,7 @@ current-generation checks.
 | Subtitle and error message   |           2 KiB each |
 | Detail body                  |               64 KiB |
 | Pair result                  |               16 KiB |
+| Copy text                    |               16 KiB |
 | Actions per item             |                    8 |
 | Encoded opaque state data    |      8 KiB, depth 64 |
 

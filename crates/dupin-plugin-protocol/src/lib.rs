@@ -2,12 +2,13 @@
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{collections::HashSet, fmt, io};
 
-pub const VERSION: u32 = 1;
+pub const VERSION: u32 = 2;
 pub const MAX_REQUEST_BYTES: usize = 16 * 1024;
 pub const MAX_RESPONSE_BYTES: usize = 256 * 1024;
 pub const MAX_RESULTS: u32 = 500;
 pub const MAX_QUERY_BYTES: usize = 4096;
 pub const MAX_STATE_BYTES: usize = 8192;
+pub const MAX_COPY_BYTES: usize = 16 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -64,6 +65,7 @@ pub enum ErrorCode {
 pub struct PluginItem {
     pub id: String,
     pub view: View,
+    pub primary: Option<String>,
     pub actions: Vec<PluginAction>,
 }
 
@@ -80,6 +82,13 @@ pub enum View {
 pub struct PluginAction {
     pub id: String,
     pub title: String,
+    pub operation: Operation,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum Operation {
+    CopyText { text: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -186,8 +195,17 @@ impl Response {
                     for action in &item.actions {
                         identifier(&action.id, "action.id")?;
                         bounded(&action.title, 512, "action.title")?;
+                        match &action.operation {
+                            Operation::CopyText { text } => bounded(text, MAX_COPY_BYTES, "copy.text")?,
+                        }
                         if !actions.insert(&action.id) {
                             return Err(ProtocolError::DuplicateId("action.id"));
+                        }
+                    }
+                    if let Some(primary) = &item.primary {
+                        identifier(primary, "primary")?;
+                        if !actions.contains(primary) {
+                            return Err(ProtocolError::InvalidField("primary"));
                         }
                     }
                 }
@@ -318,9 +336,11 @@ mod tests {
                             title: "日本語 🦀".into(),
                             subtitle: "A subtitle".into(),
                         },
+                        primary: None,
                         actions: vec![PluginAction {
                             id: "copy".into(),
                             title: "Copy result".into(),
+                            operation: Operation::CopyText { text: "3".into() },
                         }],
                     },
                     PluginItem {
@@ -329,6 +349,7 @@ mod tests {
                             title: "Details".into(),
                             body: "line one\nline two".into(),
                         },
+                        primary: None,
                         actions: vec![],
                     },
                     PluginItem {
@@ -337,6 +358,7 @@ mod tests {
                             source: "1 + 2".into(),
                             result: "3".into(),
                         },
+                        primary: None,
                         actions: vec![],
                     },
                 ],
@@ -349,6 +371,63 @@ mod tests {
             panic!()
         };
         items
+    }
+
+    #[test]
+    fn primary_actions_must_resolve_to_a_declared_operation() {
+        let mut value = response();
+        items(&mut value)[0].primary = Some("copy".into());
+        let bytes = value.encode(&request()).unwrap();
+        assert_eq!(Response::decode(&bytes, &request()).unwrap(), value);
+        items(&mut value)[0].primary = Some("missing".into());
+        assert_eq!(
+            value.encode(&request()),
+            Err(ProtocolError::InvalidField("primary"))
+        );
+        let bytes = serde_json::to_vec(&value).unwrap();
+        assert_eq!(
+            Response::decode(&bytes, &request()),
+            Err(ProtocolError::InvalidField("primary"))
+        );
+    }
+
+    #[test]
+    fn copy_payloads_are_bounded_on_encode_and_decode() {
+        let mut value = response();
+        let text = "文".repeat(MAX_COPY_BYTES / 3);
+        items(&mut value)[0].actions[0].operation = Operation::CopyText { text };
+        assert!(value.encode(&request()).is_ok());
+        for text in [String::new(), "x".repeat(MAX_COPY_BYTES + 1)] {
+            items(&mut value)[0].actions[0].operation = Operation::CopyText { text };
+            assert_eq!(
+                value.encode(&request()),
+                Err(ProtocolError::InvalidField("copy.text"))
+            );
+            let bytes = serde_json::to_vec(&value).unwrap();
+            assert_eq!(
+                Response::decode(&bytes, &request()),
+                Err(ProtocolError::InvalidField("copy.text"))
+            );
+        }
+    }
+
+    #[test]
+    fn unsupported_operations_and_old_wire_versions_are_rejected() {
+        let mut value = serde_json::to_value(response()).unwrap();
+        value["outcome"]["items"][0]["actions"][0]["operation"] =
+            json!({"kind":"run_process","command":"untrusted"});
+        assert_eq!(
+            Response::decode(&serde_json::to_vec(&value).unwrap(), &request()),
+            Err(ProtocolError::InvalidJson)
+        );
+        assert_eq!(
+            Request::decode(br#"{"version":1}"#),
+            Err(ProtocolError::UnsupportedVersion)
+        );
+        assert_eq!(
+            Response::decode(br#"{"version":1}"#, &request()),
+            Err(ProtocolError::UnsupportedVersion)
+        );
     }
     #[test]
     fn round_trips_all_views_and_errors() {
@@ -412,11 +491,11 @@ mod tests {
             Err(ProtocolError::MessageTooLarge)
         );
         assert_eq!(
-            Request::decode(br#"{"version":2,"future":true}"#),
+            Request::decode(br#"{"version":3,"future":true}"#),
             Err(ProtocolError::UnsupportedVersion)
         );
         assert_eq!(
-            Response::decode(br#"{"version":2,"future":true}"#, &request()),
+            Response::decode(br#"{"version":3,"future":true}"#, &request()),
             Err(ProtocolError::UnsupportedVersion)
         );
         let deep = format!(
@@ -570,7 +649,7 @@ mod tests {
         value = serde_json::to_value(response()).unwrap();
         value["outcome"]["items"][0]["actions"] = json!(
             (0..9)
-                .map(|i| json!({"id": i.to_string(), "title": "Copy"}))
+                .map(|i| json!({"id": i.to_string(), "title": "Copy", "operation": {"kind": "copy_text", "text": "result"}}))
                 .collect::<Vec<_>>()
         );
         assert_eq!(

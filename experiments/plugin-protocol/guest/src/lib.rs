@@ -58,6 +58,7 @@ fn handle_with(bytes: &[u8], evaluate: impl FnOnce(&str) -> String) -> Result<Ve
                         source: request.query.clone(),
                         result,
                     },
+                    primary: None,
                     actions: Vec::new(),
                 }],
                 state: None,
