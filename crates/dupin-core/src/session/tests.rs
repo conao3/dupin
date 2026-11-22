@@ -162,8 +162,8 @@ fn empty_queries_search_only_eligible_providers_and_keep_pinning() {
 }
 
 #[test]
-fn explicit_blank_commands_do_not_fall_back_to_default_providers() {
-    let (mut s, _, empty) = session_with_empty_provider();
+fn explicit_blank_commands_resume_default_providers_only_after_backspace() {
+    let (mut s, default, empty) = session_with_empty_provider();
     let routed = s.set_query("lookup term");
     assert!(matches!(
         routed.iter().find(|effect| matches!(effect, Effect::Search { .. })),
@@ -178,6 +178,15 @@ fn explicit_blank_commands_do_not_fall_back_to_default_providers() {
             .any(|effect| matches!(effect, Effect::Search { command, .. } if command == &empty))
     );
     assert_eq!(s.results(), Results::Idle);
+
+    let effects = s.intent(Intent::Backspace).unwrap();
+    let (provider, generation, query) = searched(&effects);
+    assert_eq!(provider, empty);
+    assert_eq!(query, "");
+    assert_eq!(s.command_id(), &default);
+    assert!(!s.explicit);
+    assert!(s.pending(&empty, generation));
+    assert!(!s.pending(&default, generation));
 }
 
 #[test]
