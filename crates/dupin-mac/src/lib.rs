@@ -18,3 +18,5 @@ pub use dictionary::DictionaryProvider;
 pub use settings_search::SettingsProvider;
 pub use spotlight::{SpotlightProvider, Target};
 pub use watcher::PathWatcher;
+
+pub mod system_commands;

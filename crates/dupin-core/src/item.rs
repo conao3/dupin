@@ -14,6 +14,8 @@ pub enum Action {
     Copy(String),
     /// Open the host application's preferences.
     OpenPreferences,
+    /// Dispatch an opaque host-owned operation.
+    Host(String),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

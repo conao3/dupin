@@ -63,6 +63,23 @@ See [docs/](./docs/README.md) for using, configuring and developing Dupin.
     </a>
 </p>
 
+## System commands
+
+Type `sleep` or `lock` in the ordinary launcher, select Sleep or Lock Screen,
+and explicitly activate the result with Enter. Typing and completing a query do
+not execute commands. Sleep requests full machine sleep via `pmset sleepnow`.
+Lock Screen posts the standard Control–Command–Q shortcut using public CoreGraphics
+APIs, only if event-synthesis access is already available. Dupin does not request
+permissions or change shortcuts or password policy. Refusals appear in the launcher.
+
+Manual validation remains required: full sleep and wake, the standard lock shortcut
+on the user's keyboard layout and shortcut configuration, and permission-refusal
+notices in the packaged app. CoreGraphics acknowledges posting, not successful
+locking; a changed or intercepted shortcut may prevent locking. Unattended tests
+use injected runners and never invoke these operations. Restart, shut down, log
+out, empty Trash, eject disks, dark mode and app termination remain outside this
+first slice of issue #25.
+
 ## License
 
 Dupin is licensed under [GPL-3.0-or-later](./LICENSE). Contributions need the [Contributor License Agreement](./CLA.md); see [CONTRIBUTING.md](./CONTRIBUTING.md).

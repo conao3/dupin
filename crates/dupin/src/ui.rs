@@ -682,6 +682,20 @@ impl Ui {
                 Effect::SaveHistory => self.saver.save(self.session.history()),
                 Effect::Run(action) => {
                     let action = match action {
+                        dupin_core::Action::Host(id) => {
+                            let me = self.me.clone();
+                            let running = self.running.clone();
+                            running.fetch_add(1, Ordering::AcqRel);
+                            std::thread::spawn(move || {
+                                if let Err(error) =
+                                    dupin_mac::system_commands::dispatch(&id, dupin_mac::system_commands::run)
+                                {
+                                    me.update(move |s, tx| s.show_notice(error, tx));
+                                }
+                                running.fetch_sub(1, Ordering::AcqRel);
+                            });
+                            continue;
+                        }
                         dupin_core::Action::Copy(text) => {
                             tx.copy(text);
                             continue;

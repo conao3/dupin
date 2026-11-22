@@ -8,6 +8,7 @@ pub const APPS: &str = "apps.search";
 pub const FILES: &str = "files.names";
 pub const CONTENTS: &str = "files.contents";
 pub const DICTIONARY: &str = "dictionary.lookup";
+const SYSTEM: &str = "system.commands";
 const SETTINGS: &str = "settings.search";
 const WEB_KEYWORDS: &str = "web.keywords";
 const WEB_FALLBACKS: &str = "web.fallbacks";
@@ -145,8 +146,19 @@ pub fn configured(config: &Config) -> Result<ConfiguredCommands, dupin_core::Com
         )
         .with_fallback(),
     )?;
+    registry.register(CommandSpec::new(
+        id(SYSTEM),
+        2,
+        presentation("System commands", None, None, None, false, 0.0),
+    ))?;
     registry.set_default_providers(
-        vec![apps_id, id(SETTINGS), id(WEB_KEYWORDS), id(WEB_FALLBACKS)],
+        vec![
+            apps_id,
+            id(SETTINGS),
+            id(SYSTEM),
+            id(WEB_KEYWORDS),
+            id(WEB_FALLBACKS),
+        ],
         Some(id(WEB_KEYWORDS)),
     )?;
 
@@ -190,6 +202,10 @@ pub fn register(config: &Config, apps: Arc<AppsProvider>) -> Result<Registration
     let providers: HashMap<_, Arc<dyn Provider>> = [
         (apps_id, apps as Arc<dyn Provider>),
         (
+            id(SYSTEM),
+            Arc::new(dupin_mac::system_commands::SystemProvider) as Arc<dyn Provider>,
+        ),
+        (
             id(SETTINGS),
             Arc::new(dupin_mac::SettingsProvider::default()) as Arc<dyn Provider>,
         ),
@@ -231,6 +247,71 @@ pub fn register(config: &Config, apps: Arc<AppsProvider>) -> Result<Registration
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn system_results_require_current_explicit_activation() {
+        use dupin_core::{Action, Delivery, Effect, History, Intent, Request, Session};
+        let configured = configured(&Config::default()).unwrap();
+        let mut session = Session::new(History::default(), configured.registry).unwrap();
+        for query in ["sleep", "lock"] {
+            let effects = session.set_query(query);
+            assert!(!effects.iter().any(|e| matches!(e, Effect::Run(_))));
+            let generation = effects
+                .iter()
+                .find_map(|e| match e {
+                    Effect::Search { generation, .. } => Some(*generation),
+                    _ => None,
+                })
+                .unwrap();
+            assert!(
+                !session
+                    .intent(Intent::Open)
+                    .unwrap_or_default()
+                    .iter()
+                    .any(|e| matches!(e, Effect::Run(_)))
+            );
+            let mut rows = Vec::new();
+            dupin_mac::system_commands::SystemProvider
+                .search(&Request::detached(query, 2), &mut |batch| rows.extend(batch))
+                .unwrap();
+            session.deliver_from(
+                id(SYSTEM),
+                Delivery::Batch {
+                    generation,
+                    items: rows.clone(),
+                },
+            );
+            assert!(
+                !session
+                    .intent(Intent::Complete)
+                    .unwrap_or_default()
+                    .iter()
+                    .any(|e| matches!(e, Effect::Run(_)))
+            );
+            let activation = session.intent(Intent::Open).unwrap();
+            assert!(
+                activation
+                    .iter()
+                    .any(|e| matches!(e, Effect::Run(Action::Host(_))))
+            );
+            let effects = session.set_query("unrelated");
+            assert!(!effects.iter().any(|e| matches!(e, Effect::Run(_))));
+            session.deliver_from(
+                id(SYSTEM),
+                Delivery::Batch {
+                    generation,
+                    items: rows,
+                },
+            );
+            assert!(
+                !session
+                    .intent(Intent::Open)
+                    .unwrap_or_default()
+                    .iter()
+                    .any(|e| matches!(e, Effect::Run(_)))
+            );
+        }
+    }
 
     #[test]
     fn web_results_use_the_registered_session_action_and_completion_paths() {
