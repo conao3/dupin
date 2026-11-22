@@ -294,7 +294,7 @@
 					</div>
 				</div>
 			</div>
-		{:else if rows.length === 0 && found && !searching}
+		{:else if rows.length === 0 && found && !searching && !shown.result}
 			<div class="hint">No matches</div>
 		{:else if rows.length > 0}
 			<ul class="rows">
