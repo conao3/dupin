@@ -126,7 +126,7 @@ impl Services {
             for capability in &plugin.capabilities {
                 policy.set_grant(
                     &entry.handle,
-                    capability.kind,
+                    capability.kind.clone(),
                     settings.grants.iter().any(|id| id == &capability.id),
                 );
             }
@@ -572,7 +572,24 @@ mod manifest_tests {
                 command: SystemCommand::Sleep,
             },
         });
-        assert!(!accepts_guest_items(&manifest, &[item]));
+        assert!(!accepts_guest_items(&manifest, &[item.clone()]));
+        item.actions[0].operation = Operation::OpenUrl {
+            url: "dict://term".into(),
+        };
+        assert!(!accepts_guest_items(&manifest, &[item.clone()]));
+        let mut declaration: serde_json::Value =
+            serde_json::from_slice(include_bytes!("calculator-manifest.json")).unwrap();
+        declaration["actions"] = serde_json::json!(["open_url"]);
+        declaration["capabilities"] = serde_json::json!([{
+            "id": "open-url:dict:", "title": "Dictionary URLs", "description": "Fixture only",
+            "kind": {"open-url": {"scheme": "dict", "host": null}}
+        }]);
+        let scoped = Manifest::decode(&serde_json::to_vec(&declaration).unwrap()).unwrap();
+        assert!(accepts_guest_items(&scoped, &[item.clone()]));
+        item.actions[0].operation = Operation::OpenUrl {
+            url: "maps://term".into(),
+        };
+        assert!(!accepts_guest_items(&scoped, &[item]));
     }
     #[test]
     fn host_rejects_operations_outside_manifest_even_before_grants() {

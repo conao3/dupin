@@ -230,7 +230,7 @@ neither guest isolation nor capability grants. Resource accounting and suspensio
 remain future work.
 
 The current Calculator and System registrations consume manifest schema version 1,
-independent of wire version 3 and private ABI 1. Bundled JSON is validated before
+independent of wire version 4 and private ABI 1. Bundled JSON is validated before
 registration, Settings or policy installation. Capability IDs are canonical names
 of typed privileges and cannot be reassigned by a manifest update. New declarations
 remain ungranted. Supported views and operation kinds are checked before guest

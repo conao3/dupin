@@ -1,5 +1,5 @@
 {
-	"version": 2,
+	"version": 4,
 	"request_id": "long-answer-1",
 	"generation": "1",
 	"command": "calculator",

@@ -1,7 +1,7 @@
 # Calculator guest
 
 This separate workspace builds an rlib and a bare `wasm32-unknown-unknown`
-cdylib, with public `handle`, version 3 JSON messages and private memory ABI
+cdylib, with public `handle`, version 4 JSON messages and private memory ABI
 version 1. Dupin bundles the generated module and runs it through
 `dupin-plugin-runtime`. See the [fixture commands](../../experiments/plugin-protocol/README.md).
 Generated Wasm modules are not checked in; Nix builds and packages them.

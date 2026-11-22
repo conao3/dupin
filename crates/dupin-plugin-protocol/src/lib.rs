@@ -2,7 +2,7 @@
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{collections::HashSet, fmt, io};
 
-pub const VERSION: u32 = 3;
+pub const VERSION: u32 = 4;
 pub const MAX_REQUEST_BYTES: usize = 16 * 1024;
 pub const MAX_RESPONSE_BYTES: usize = 256 * 1024;
 pub const MAX_RESULTS: u32 = 500;
@@ -89,6 +89,7 @@ pub struct PluginAction {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Operation {
     CopyText { text: String },
+    OpenUrl { url: String },
     SystemCommand { command: SystemCommand },
 }
 
@@ -205,6 +206,10 @@ impl Response {
                         bounded(&action.title, 512, "action.title")?;
                         match &action.operation {
                             Operation::CopyText { text } => bounded(text, MAX_COPY_BYTES, "copy.text")?,
+                            Operation::OpenUrl { url } => {
+                                url_scope::validated_url(url)
+                                    .map_err(|_| ProtocolError::InvalidField("open_url.url"))?;
+                            }
                             Operation::SystemCommand { .. } => {}
                         }
                         if !actions.insert(&action.id) {
@@ -382,6 +387,40 @@ mod tests {
         items
     }
 
+    #[test]
+    fn url_wire_payloads_are_checked_and_v3_is_explicitly_rejected() {
+        let mut value = response();
+        items(&mut value)[0].actions[0].operation = Operation::OpenUrl {
+            url: "maps://?q=London".into(),
+        };
+        assert_eq!(
+            Response::decode(&value.encode(&request()).unwrap(), &request()).unwrap(),
+            value
+        );
+        for url in [
+            "file:///fixture".to_owned(),
+            "https://example.com/%zz".into(),
+            "x".repeat(url_scope::MAX_URL_BYTES + 1),
+        ] {
+            items(&mut value)[0].actions[0].operation = Operation::OpenUrl { url };
+            assert_eq!(
+                value.encode(&request()),
+                Err(ProtocolError::InvalidField("open_url.url"))
+            );
+            assert_eq!(
+                Response::decode(&serde_json::to_vec(&value).unwrap(), &request()),
+                Err(ProtocolError::InvalidField("open_url.url"))
+            );
+        }
+        assert_eq!(
+            Request::decode(br#"{"version":3}"#),
+            Err(ProtocolError::UnsupportedVersion)
+        );
+        assert_eq!(
+            Response::decode(br#"{"version":3}"#, &request()),
+            Err(ProtocolError::UnsupportedVersion)
+        );
+    }
     #[test]
     fn primary_actions_must_resolve_to_a_declared_operation() {
         let mut value = response();
@@ -710,3 +749,5 @@ mod tests {
 }
 
 pub mod manifest;
+
+pub mod url_scope;

@@ -777,6 +777,17 @@ impl Ui {
                                                         command,
                                                         dupin_mac::system_commands::run,
                                                     ),
+                                                    Some(dupin_plugin_protocol::Operation::OpenUrl {
+                                                        url,
+                                                    }) => {
+                                                        if dupin_mac::workspace::run(
+                                                            &dupin_mac::workspace::Action::OpenUrl(url),
+                                                        ) {
+                                                            Ok(())
+                                                        } else {
+                                                            Err("The system could not open this URL.".into())
+                                                        }
+                                                    }
                                                     _ => Err("Unsupported operation.".into()),
                                                 }),
                                         ),

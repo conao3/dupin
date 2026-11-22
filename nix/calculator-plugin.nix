@@ -2,5 +2,5 @@
 callPackage ./wasm-plugin.nix {
   directory = "plugins/calculator";
   resourceName = "calculator.wasm";
-  cargoHash = "sha256-E+x8kpwzdT7zRA9EVJQkX46ulbtP+c/6K4zG7swoeRg=";
+  cargoHash = "sha256-k19gSyvYfLaQU7ktzzy6/dXtrjJnTc/1JFFKXkhFyDo=";
 }

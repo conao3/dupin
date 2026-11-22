@@ -2,41 +2,47 @@ use crate::{Operation, SystemCommand, View};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 pub const SCHEMA_VERSION: u32 = 1;
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Capability {
     ClipboardWrite,
     SystemSleep,
     SystemLockScreen,
     CalendarRead,
+    OpenUrl(crate::url_scope::UrlScope),
 }
 impl Capability {
-    pub fn id(self) -> &'static str {
+    pub fn id(&self) -> String {
         match self {
+            Self::OpenUrl(scope) => return scope.id(),
             Self::ClipboardWrite => "clipboard-write",
             Self::SystemSleep => "system-sleep",
             Self::SystemLockScreen => "system-lock-screen",
             Self::CalendarRead => "calendar-read",
         }
+        .into()
     }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ActionKind {
     CopyText,
+    OpenUrl,
     Sleep,
     LockScreen,
 }
 impl ActionKind {
-    pub fn capability(self) -> Capability {
-        match self {
+    pub fn capability(self) -> Option<Capability> {
+        Some(match self {
+            Self::OpenUrl => return None,
             Self::CopyText => Capability::ClipboardWrite,
             Self::Sleep => Capability::SystemSleep,
             Self::LockScreen => Capability::SystemLockScreen,
-        }
+        })
     }
     pub fn of(op: &Operation) -> Self {
         match op {
+            Operation::OpenUrl { .. } => Self::OpenUrl,
             Operation::CopyText { .. } => Self::CopyText,
             Operation::SystemCommand {
                 command: SystemCommand::Sleep,
@@ -146,14 +152,17 @@ impl Manifest {
         let mut caps = BTreeSet::new();
         for cap in &self.capabilities {
             if cap.id != cap.kind.id()
-                || !caps.insert(cap.kind)
+                || !caps.insert(cap.kind.clone())
                 || !text(&cap.title, 128)
                 || !text(&cap.description, 1024)
             {
                 return Err("invalid capability identity");
             }
         }
-        if self.actions.iter().any(|a| !caps.contains(&a.capability())) {
+        if self.actions.iter().any(|a| match a.capability() {
+            Some(cap) => !caps.contains(&cap),
+            None => !caps.iter().any(|c| matches!(c, Capability::OpenUrl(_))),
+        }) {
             return Err("undeclared action capability");
         }
         Ok(ValidatedManifest(self))
@@ -178,6 +187,13 @@ pub fn validate_catalog(manifests: &[ValidatedManifest], reserved: &[&str]) -> R
 impl ValidatedManifest {
     pub fn allows_operation(&self, op: &Operation) -> bool {
         self.actions.contains(&ActionKind::of(op))
+            && match op {
+                Operation::OpenUrl { url } => self
+                    .capabilities
+                    .iter()
+                    .any(|c| matches!(&c.kind, Capability::OpenUrl(scope) if scope.allows(url))),
+                _ => true,
+            }
     }
     pub fn allows_view(&self, view: &View) -> bool {
         self.views.contains(&match view {
@@ -199,6 +215,40 @@ mod tests {
     }
     fn decode(v: &serde_json::Value) -> Result<ValidatedManifest, &'static str> {
         Manifest::decode(&serde_json::to_vec(v).unwrap())
+    }
+    #[test]
+    fn url_actions_require_matching_validated_scopes_and_ids() {
+        let mut v = value();
+        v["actions"] = serde_json::json!(["open_url"]);
+        assert!(decode(&v).is_err());
+        v["capabilities"] = serde_json::json!([{
+            "id": "open-url:https:example.com", "title": "Open example",
+            "description": "Open example URLs", "kind": {"open-url": {"scheme": "HTTPS", "host": "EXAMPLE.COM"}}
+        }]);
+        let manifest = decode(&v).unwrap();
+        assert!(manifest.allows_operation(&Operation::OpenUrl {
+            url: "https://example.com/path".into()
+        }));
+        assert!(!manifest.allows_operation(&Operation::OpenUrl {
+            url: "https://example.com.evil/".into()
+        }));
+        for (scheme, host) in [
+            ("https", serde_json::Value::Null),
+            ("file", serde_json::Value::Null),
+            ("https", "example.com:443".into()),
+            ("https", "%65xample.com".into()),
+        ] {
+            let mut bad = v.clone();
+            bad["capabilities"][0]["kind"]["open-url"]["scheme"] = scheme.into();
+            bad["capabilities"][0]["kind"]["open-url"]["host"] = host;
+            assert!(decode(&bad).is_err());
+        }
+        v["capabilities"][0]["kind"]["open-url"]["host"] = "other.example".into();
+        assert!(decode(&v).is_err());
+        let calculator = decode(&value()).unwrap();
+        assert!(!calculator.allows_operation(&Operation::OpenUrl {
+            url: "dict://term".into()
+        }));
     }
     #[test]
     fn current_manifests_roundtrip() {

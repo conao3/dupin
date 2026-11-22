@@ -76,7 +76,7 @@ impl Policy {
         &mut self,
         manifest: &dupin_plugin_protocol::manifest::ValidatedManifest,
     ) -> PluginHandle {
-        self.install(manifest.capabilities.iter().map(|cap| cap.kind))
+        self.install(manifest.capabilities.iter().map(|cap| cap.kind.clone()))
     }
 
     fn revision(&mut self) -> u64 {
@@ -120,7 +120,7 @@ impl Policy {
         handle: &PluginHandle,
         manifest: &dupin_plugin_protocol::manifest::ValidatedManifest,
     ) -> bool {
-        self.update(handle, manifest.capabilities.iter().map(|cap| cap.kind))
+        self.update(handle, manifest.capabilities.iter().map(|cap| cap.kind.clone()))
     }
 
     pub fn uninstall(&mut self, handle: &PluginHandle) -> bool {
@@ -217,7 +217,7 @@ impl Policy {
         }
         Access::Allowed(Permit {
             plugin: handle.clone(),
-            capability: cap,
+            capability: cap.clone(),
             revision: grant.revision,
             consent_revision: if cap == Capability::CalendarRead {
                 self.consent_revision
@@ -227,12 +227,40 @@ impl Policy {
         })
     }
 
+    pub fn url_access(&self, handle: &PluginHandle, url: &str) -> (Option<Capability>, Access) {
+        if dupin_plugin_protocol::url_scope::validated_url(url).is_err() {
+            return (None, Access::Undeclared);
+        }
+        if !self.owns(handle) {
+            return (None, Access::MissingPlugin);
+        }
+        let Some(plugin) = self.plugins.get(&handle.instance) else {
+            return (None, Access::MissingPlugin);
+        };
+        if !plugin.enabled {
+            return (None, Access::Disabled);
+        }
+        let mut denied = (None, Access::Undeclared);
+        for cap in plugin.grants.keys() {
+            if let Capability::OpenUrl(scope) = cap {
+                if scope.allows(url) {
+                    let access = self.access(handle, cap.clone());
+                    if matches!(access, Access::Allowed(_)) {
+                        return (Some(cap.clone()), access);
+                    }
+                    denied = (Some(cap.clone()), access);
+                }
+            }
+        }
+        denied
+    }
+
     #[must_use]
     pub fn validate(&self, permit: &Permit, cap: Capability) -> bool {
         if permit.capability != cap {
             return false;
         }
-        matches!(self.access(&permit.plugin, cap), Access::Allowed(current)
+        matches!(self.access(&permit.plugin, cap.clone()), Access::Allowed(current)
             if current.revision == permit.revision && current.consent_revision == permit.consent_revision)
     }
 }

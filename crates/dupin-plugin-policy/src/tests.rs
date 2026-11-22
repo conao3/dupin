@@ -9,7 +9,7 @@ fn permit(policy: &Policy, plugin: &PluginHandle, cap: Capability) -> Permit {
 }
 
 fn enabled(policy: &mut Policy, declarations: &[Capability]) -> PluginHandle {
-    let plugin = policy.install(declarations.iter().copied());
+    let plugin = policy.install(declarations.iter().cloned());
     assert!(policy.set_enabled(&plugin, true));
     plugin
 }
@@ -178,7 +178,7 @@ fn validated_manifest_update_does_not_grant_new_privileges() {
         .retain(|c| c.kind == Capability::SystemSleep);
     manifest
         .actions
-        .retain(|a| a.capability() == Capability::SystemSleep);
+        .retain(|a| a.capability() == Some(Capability::SystemSleep));
     let initial = manifest.clone().validate().unwrap();
     let mut policy = Policy::default();
     let handle = policy.install_manifest(&initial);

@@ -31,12 +31,22 @@ impl PreparedOperation {
         {
             return Err(PrepareError::InvalidOperation);
         }
-        let capability = dupin_plugin_protocol::manifest::ActionKind::of(&operation).capability();
-        match policy.access(plugin, capability) {
+        let (capability, access) = if let Operation::OpenUrl { url } = &operation {
+            dupin_plugin_protocol::url_scope::validated_url(url)
+                .map_err(|_| PrepareError::InvalidOperation)?;
+            policy.url_access(plugin, url)
+        } else {
+            let capability = dupin_plugin_protocol::manifest::ActionKind::of(&operation)
+                .capability()
+                .expect("non-URL capability");
+            let access = policy.access(plugin, capability.clone());
+            (Some(capability), access)
+        };
+        match access {
             Access::Allowed(permit) => Ok(Self {
                 permit,
                 operation,
-                capability,
+                capability: capability.expect("allowed capability"),
             }),
             access => Err(PrepareError::Access(access)),
         }
@@ -98,7 +108,7 @@ mod tests {
         ] {
             let operation = || Operation::SystemCommand { command };
             let mut policy = Policy::default();
-            let plugin = policy.install([capability]);
+            let plugin = policy.install([capability.clone()]);
             assert!(matches!(
                 PreparedOperation::prepare(&policy, &plugin, operation()),
                 Err(PrepareError::Access(Access::Disabled))
@@ -108,7 +118,7 @@ mod tests {
                 PreparedOperation::prepare(&policy, &plugin, operation()),
                 Err(PrepareError::Access(Access::NeedsGrant))
             ));
-            policy.set_grant(&plugin, capability, true);
+            policy.set_grant(&plugin, capability.clone(), true);
             assert!(matches!(
                 PreparedOperation::prepare(
                     &policy,
@@ -123,7 +133,7 @@ mod tests {
                 ),
                 Err(PrepareError::Access(Access::Undeclared))
             ));
-            let foreign = policy.install([capability, other]);
+            let foreign = policy.install([capability.clone(), other]);
             policy.set_enabled(&foreign, true);
             assert!(PreparedOperation::prepare(&policy, &foreign, operation()).is_err());
             for disable in [false, true] {
@@ -132,8 +142,8 @@ mod tests {
                     policy.set_enabled(&plugin, false);
                     policy.set_enabled(&plugin, true);
                 } else {
-                    policy.set_grant(&plugin, capability, false);
-                    policy.set_grant(&plugin, capability, true);
+                    policy.set_grant(&plugin, capability.clone(), false);
+                    policy.set_grant(&plugin, capability.clone(), true);
                 }
                 assert_eq!(
                     prepared.dispatch(&policy, || true, |_| panic!("stale permit")),
@@ -246,6 +256,140 @@ mod tests {
                 }
             )
             .is_ok()
+        );
+    }
+}
+
+#[cfg(test)]
+mod url_tests {
+    use super::*;
+    use dupin_plugin_protocol::url_scope::UrlScope;
+    fn cap(host: &str) -> Capability {
+        Capability::OpenUrl(UrlScope::new("https", Some(host)).unwrap())
+    }
+    fn op(url: &str) -> Operation {
+        Operation::OpenUrl { url: url.into() }
+    }
+    #[test]
+    fn scoped_grants_and_lifecycle_are_enforced_without_ui() {
+        let mut policy = Policy::default();
+        let capability = cap("example.com");
+        let plugin = policy.install([capability.clone()]);
+        let url = || op("HTTPS://EXAMPLE.COM/path?q=hello%20world");
+        assert!(matches!(
+            PreparedOperation::prepare(&policy, &plugin, url()),
+            Err(PrepareError::Access(Access::Disabled))
+        ));
+        policy.set_enabled(&plugin, true);
+        assert!(matches!(
+            PreparedOperation::prepare(&policy, &plugin, url()),
+            Err(PrepareError::Access(Access::NeedsGrant))
+        ));
+        policy.set_grant(&plugin, capability.clone(), true);
+        let other = policy.install([capability.clone()]);
+        policy.set_enabled(&other, true);
+        assert!(PreparedOperation::prepare(&policy, &other, url()).is_err());
+        let mut calls = 0;
+        PreparedOperation::prepare(&policy, &plugin, url())
+            .unwrap()
+            .dispatch(&policy, || true, |_| calls += 1)
+            .unwrap();
+        assert_eq!(calls, 1);
+        for bad in [
+            "https://ｅxample.com/",
+            "https://example.com.evil/",
+            "http://example.com/",
+            "https://evil.example.com/",
+            "https://example.com@evil.com/",
+            "https://user@example.com/",
+            "https://example.com:443/",
+            "https://%65xample.com/",
+            "https://example.com./",
+            "https://example.com:444/",
+            "file:///tmp/fixture",
+            "javascript:alert(1)",
+            "data:text/plain,x",
+            "https:example.com",
+            "https://example.com/%zz",
+            "not a URL",
+            "",
+        ] {
+            assert!(
+                PreparedOperation::prepare(&policy, &plugin, op(bad)).is_err(),
+                "{bad}"
+            );
+            assert!(
+                !matches!(policy.url_access(&plugin, bad).1, Access::Allowed(_)),
+                "{bad}"
+            );
+        }
+        assert!(PreparedOperation::prepare(&policy, &plugin, op(&"x".repeat(8193))).is_err());
+        let stale = PreparedOperation::prepare(&policy, &plugin, url()).unwrap();
+        policy.set_grant(&plugin, capability.clone(), false);
+        policy.set_grant(&plugin, capability.clone(), true);
+        assert_eq!(
+            stale.dispatch(&policy, || true, |_| panic!()),
+            Err(DispatchError::AccessChanged)
+        );
+        let stale = PreparedOperation::prepare(&policy, &plugin, url()).unwrap();
+        policy.update(&plugin, [cap("other.example")]);
+        assert!(matches!(
+            PreparedOperation::prepare(&policy, &plugin, op("https://other.example/")),
+            Err(PrepareError::Access(Access::NeedsGrant))
+        ));
+        assert_eq!(
+            stale.dispatch(&policy, || true, |_| panic!()),
+            Err(DispatchError::AccessChanged)
+        );
+        policy.update(&plugin, [capability.clone()]);
+        assert!(matches!(
+            PreparedOperation::prepare(&policy, &plugin, url()),
+            Err(PrepareError::Access(Access::NeedsGrant))
+        ));
+        policy.set_grant(&plugin, capability, true);
+        assert_eq!(
+            PreparedOperation::prepare(&policy, &plugin, url())
+                .unwrap()
+                .dispatch(&policy, || false, |_| panic!()),
+            Err(DispatchError::Cancelled)
+        );
+        let stale = PreparedOperation::prepare(&policy, &plugin, url()).unwrap();
+        policy.uninstall(&plugin);
+        assert_eq!(
+            stale.dispatch(&policy, || true, |_| panic!()),
+            Err(DispatchError::AccessChanged)
+        );
+    }
+    #[test]
+    fn scheme_only_scopes_are_explicit_and_calculator_cannot_open_urls() {
+        let mut policy = Policy::default();
+        let calculator = policy.install([Capability::ClipboardWrite]);
+        policy.set_enabled(&calculator, true);
+        policy.set_grant(&calculator, Capability::ClipboardWrite, true);
+        assert!(matches!(
+            PreparedOperation::prepare(&policy, &calculator, op("dict://term")),
+            Err(PrepareError::Access(Access::Undeclared))
+        ));
+        for scheme in ["dict", "maps"] {
+            let capability = Capability::OpenUrl(UrlScope::new(scheme, None).unwrap());
+            let plugin = policy.install([capability.clone()]);
+            policy.set_enabled(&plugin, true);
+            policy.set_grant(&plugin, capability, true);
+            for target in ["one", "another"] {
+                PreparedOperation::prepare(&policy, &plugin, op(&format!("{scheme}://{target}")))
+                    .unwrap()
+                    .dispatch(&policy, || true, |_| {})
+                    .unwrap();
+            }
+        }
+        for scheme in ["https", "http", "file", "javascript", "data"] {
+            assert!(UrlScope::new(scheme, None).is_err());
+        }
+        assert_eq!(cap("EXAMPLE.COM").id(), cap("example.com").id());
+        assert_ne!(cap("example.com").id(), cap("other.example").id());
+        assert_ne!(
+            Capability::OpenUrl(UrlScope::new("http", Some("example.com")).unwrap()).id(),
+            cap("example.com").id()
         );
     }
 }

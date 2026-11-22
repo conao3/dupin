@@ -7,14 +7,14 @@ The fixture CLI and adversarial runtime tests exercise the same implementation.
 External-plugin manifests and installation, streaming and forms remain separate
 work.
 
-`dupin-plugin-protocol` has only Serde dependencies and is shared by hosts and
+`dupin-plugin-protocol` uses Serde and the WHATWG URL parser and is shared by hosts and
 guests. The calculator guest and the fixture in `experiments/plugin-protocol`
 exchange messages through actual Wasm memory rather than passing native Rust
 objects across an ABI.
 
 ## Messages
 
-Messages are UTF-8 JSON with `version: 3`. Unknown versions, fields, view kinds
+Messages are UTF-8 JSON with `version: 4`. Unknown versions, fields, view kinds
 and error codes are rejected. Request IDs and generations are opaque strings,
 so authors do not need JSON numbers to represent a host's full-width counters.
 
@@ -31,10 +31,10 @@ A text subtitle may be empty. Items also declare a nullable `primary` action ID
 for Enter. A non-null ID must resolve to one of that item's actions; null leaves
 selection of an action to the host menu.
 
-Actions contain an ID, title and a typed `operation`. Operations are `copy_text`, with a non-empty bounded `text` value, and
+Actions contain an ID, title and a typed `operation`. Operations include scoped `open_url` and `copy_text`, with a non-empty bounded `text` value, and
 `system_command`, with a closed `command` enum (`sleep` or `lock_screen`).
-Unknown operations and command values are rejected. Version 3 deliberately
-replaces version 2; guests must be rebuilt. No executable code, native
+Unknown operations and command values are rejected. Version 4 deliberately
+replaces version 3; guests must be rebuilt. No executable code, native
 UI objects or arbitrary OS operations are accepted. The host must check the
 plugin's declared and granted capability for that operation at invocation time;
 displaying the action or pressing Enter does not create a grant. Protocol
@@ -128,3 +128,14 @@ External-plugin installation, additional operations, asynchronous host
 completions and migration of the native app, file and dictionary providers remain
 future work. These bounds do not make trusted native providers a sandbox or
 complete the external-plugin permission design.
+
+Version 4 adds typed `open_url { url }` operations. Manifest action `open_url`
+requires a scoped capability, for example
+`{"id":"open-url:https:example.com","title":"Open example","description":"Open example URLs","kind":{"open-url":{"scheme":"https","host":"example.com"}}}`.
+Scope identity includes the canonical scheme and exact optional hostname.
+Only `dict` and `maps` allow an omitted hostname; HTTP(S) requires one.
+Credentials, ports, encoded authorities and unsafe schemes are rejected.
+Manifest and broker both check URLs; the policy resolves scoped grants, and
+immutable permits are revalidated before the off-main workspace handoff.
+This adds no bundled URL grants or providers. Native providers remain trusted
+code, not sandboxed by the manifest. The private memory ABI remains version 1.
