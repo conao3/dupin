@@ -9,7 +9,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use dupin_core::{
-    Backdrop, CommandId, Config, Delivery, Effect, History, InputSource, Intent, Position, Searcher, Session,
+    Backdrop, CommandId, Config, Delivery, DisplaySelection, Effect, History, InputSource, Intent, Position,
+    Searcher, Session,
 };
 use dupin_mac::{AppsProvider, AppsWatcher};
 use rune::{
@@ -22,6 +23,17 @@ const ICON_CAP: usize = 512;
 /// The panel's top edge below the display's for `position = "top"`: about where Spotlight
 /// puts its field.
 const TOP_MARGIN: f32 = 180.0;
+
+fn panel_offsets(frame: [f64; 4], visible: [f64; 4], position: Position) -> (f32, f32) {
+    let left = visible[0] - frame[0] + ((visible[2] - f64::from(crate::PANEL_WIDTH)) / 2.0).max(0.0);
+    let top = frame[1] + frame[3] - visible[1] - visible[3];
+    let room = (visible[3] - f64::from(crate::view::HEADER_H)).max(0.0);
+    let offset = match position {
+        Position::Center => room / 2.0,
+        Position::Top => f64::from(TOP_MARGIN).min(room),
+    };
+    (left as f32, (top + offset) as f32)
+}
 pub const ICON_SIZE: f32 = 32.0;
 
 pub struct Configuration {
@@ -60,6 +72,7 @@ pub struct Ui {
     _apps_watcher: Option<AppsWatcher>,
     saver: crate::store::Saver,
     position: Position,
+    display: DisplaySelection,
     input_source: InputSource,
     /// The input source to put back when the panel hides, if showing it switched one.
     restore_input: Option<dupin_mac::input_source::Previous>,
@@ -143,6 +156,7 @@ impl Ui {
             deadlines: HashMap::new(),
             _apps_watcher: apps_watcher,
             position: config.position,
+            display: config.display,
             input_source: config.input_source.clone(),
             configuration,
             restore_input: None,
@@ -168,6 +182,7 @@ impl Ui {
             self.apply(effects, tx);
         }
         self.position = config.position;
+        self.display = config.display;
         self.input_source = config.input_source.clone();
         self.updater.set_enabled(config.auto_update);
         if self.backdrop_pick != config.backdrop {
@@ -290,30 +305,41 @@ impl Ui {
         }
     }
 
-    /// The panel's top edge below the display's, for the configured position. Centering puts
-    /// the field (not the whole panel, which grows with results) at the display's middle.
-    fn top_margin(&self) -> f32 {
-        match self.position {
-            Position::Top => TOP_MARGIN,
-            Position::Center => dupin_mac::window::pointer_display_height().map_or(TOP_MARGIN, |h| {
-                ((h as f32 - crate::view::HEADER_H) / 2.0).max(0.0)
-            }),
-        }
-    }
-
     fn show(&mut self, tx: &mut Tx) {
         crate::trace::summoned();
         if let Some(problem) = self.backdrop.refresh() {
             crate::log::warn(problem);
         }
         self.query.focused = true;
+        let (display, align, inset, margin) =
+            if let Some(screen) = dupin_mac::window::display_geometry(self.display) {
+                if screen.active_unavailable {
+                    self.notice.get_or_insert_with(|| {
+                        "Couldn't read the focused window; using the main display.".into()
+                    });
+                }
+                let (inset, margin) = panel_offsets(screen.frame, screen.visible_frame, self.position);
+                (
+                    DisplayTarget::Native(rune::NativeDisplayId::MacOS(screen.native_id)),
+                    Align::Start,
+                    inset,
+                    margin,
+                )
+            } else {
+                let display = if self.display == DisplaySelection::Mouse {
+                    DisplayTarget::UnderPointer
+                } else {
+                    DisplayTarget::Primary
+                };
+                (display, Align::Center, 0.0, TOP_MARGIN)
+            };
         self.me.place(
-            DisplayTarget::UnderPointer,
+            display,
             OverlayPlacement::Edge {
                 edge: ScreenEdge::Top,
-                margin: self.top_margin(),
-                align: Align::Center,
-                inset: 0.0,
+                margin,
+                align,
+                inset,
             },
         );
         self.shown = true;
@@ -685,6 +711,21 @@ mod deadline_tests {
 #[cfg(test)]
 mod config_tests {
     use super::*;
+
+    #[test]
+    fn places_the_query_inside_the_selected_screens_visible_frame() {
+        let frame = [100.0, -900.0, 1440.0, 900.0];
+        let visible = [160.0, -850.0, 1380.0, 820.0];
+        assert_eq!(panel_offsets(frame, visible, Position::Center), (410.0, 408.0));
+        assert_eq!(panel_offsets(frame, visible, Position::Top), (410.0, 210.0));
+    }
+
+    #[test]
+    fn top_spacing_cannot_push_the_query_below_the_visible_area() {
+        let frame = [-800.0, 200.0, 800.0, 150.0];
+        let visible = [-800.0, 200.0, 800.0, 120.0];
+        assert_eq!(panel_offsets(frame, visible, Position::Top), (60.0, 86.0));
+    }
 
     #[test]
     fn a_failed_save_and_invalid_snapshot_restore_acknowledged_values() {

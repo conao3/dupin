@@ -197,14 +197,16 @@ mod tests {
     }
 
     #[test]
-    fn saving_config_preserves_custom_dictionary_keywords() {
-        let config = dupin_core::Config::parse("dictionary_keywords = [\"word\", \"lookup\"]").unwrap();
+    fn saving_config_preserves_custom_settings() {
+        let config =
+            dupin_core::Config::parse("dictionary_keywords = [\"word\", \"lookup\"]\ndisplay = \"active\"")
+                .unwrap();
         let toml = toml::to_string(&config).unwrap();
         let path = scratch("dictionary-keywords").join("config.toml");
         write(&path, &toml).unwrap();
 
         let loaded = dupin_core::Config::parse(&std::fs::read_to_string(path).unwrap()).unwrap();
-        assert_eq!(loaded.dictionary_keywords, ["word", "lookup"]);
+        assert_eq!(loaded, config);
     }
 
     #[test]
