@@ -5,8 +5,8 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, RwLock};
 
 use dupin_core::{
     Backdrop, CommandId, Config, Delivery, Effect, History, InputSource, Intent, Position, Searcher, Session,
@@ -56,6 +56,7 @@ pub struct Ui {
     backdrop_pick: Backdrop,
     icon_cache: Option<ImageCache>,
     searchers: HashMap<CommandId, Searcher>,
+    file_demotions: Arc<RwLock<Vec<String>>>,
     deadlines: HashMap<CommandId, (u64, f64)>,
     plugins: crate::plugins::Services,
     _apps_watcher: Option<AppsWatcher>,
@@ -142,6 +143,7 @@ impl Ui {
             backdrop_pick: config.backdrop.clone(),
             icon_cache: None,
             searchers,
+            file_demotions: registration.file_demotions,
             deadlines: HashMap::new(),
             plugins,
             _apps_watcher: apps_watcher,
@@ -161,6 +163,14 @@ impl Ui {
     pub fn apply_config(&mut self, config: &Config, tx: &mut Tx) {
         let previous_limit = self.session.command().result_limit;
         self.plugins.apply_config(config);
+        let ranking_changed = {
+            let mut rules = self.file_demotions.write().unwrap();
+            let changed = *rules != config.file_demotions;
+            if changed {
+                rules.clone_from(&config.file_demotions);
+            }
+            changed
+        };
         let registration =
             crate::commands::configured(config).expect("built-in command registration is valid");
         let effects = self
@@ -169,7 +179,9 @@ impl Ui {
             .expect("built-in command registration is valid");
         self.apply(effects, tx);
         self.registration_notice = registration.notice;
-        if self.session.command().result_limit != previous_limit {
+        if self.session.command().result_limit != previous_limit
+            || (ranking_changed && self.session.command_id().as_str() == crate::commands::FILES)
+        {
             let effects = self.session.refresh();
             self.apply(effects, tx);
         }
@@ -519,7 +531,7 @@ impl Ui {
                     query,
                 } => {
                     let spec = self.session.provider_spec(&command).expect("registered provider");
-                    let limit = spec.result_limit;
+                    let limit = spec.candidate_limit();
                     let due = tx.clock() + spec.deadline.as_secs_f64();
                     self.deadlines.retain(|id, (g, _)| {
                         let keep = self.session.pending(id, *g);
