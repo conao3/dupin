@@ -279,7 +279,7 @@ def main [
             commit: (checked git -C $source_root rev-parse HEAD)
             status: (checked git -C $source_root status --porcelain)
             github_sha: ($env.GITHUB_SHA? | default null)
-            pull_request_head: ($env.PR_HEAD_SHA? | default null)
+            pull_request_head: ($env.PR_HEAD_SHA? | default --empty null)
         }
         script_sha256: (sha256 $script)
         helper_source_sha256: (sha256 $usage_source)
@@ -298,7 +298,8 @@ def main [
 
     $metadata | to json | save ($output | path join metadata.json)
 
-    (checked
+    let preparation = try {
+        (checked
         /usr/bin/clang
         -std=c11
         -Wall
@@ -309,23 +310,45 @@ def main [
         -o
         $helper
     ) | ignore
-    let self_sample = checked $helper --self | from json
-    if $self_sample.physical_footprint_bytes <= 0 or $self_sample.resident_bytes <= 0 {
-        error make {msg: 'resource-usage helper self-check returned an empty measurement'}
-    }
-    let native = prepare-app $native_app ($work | path join native.app)
-    let wasm = prepare-app $wasm_app ($work | path join wasm.app)
-    if $native.executable_sha256 == $wasm.executable_sha256 {
-        error make {
-            msg: 'native-only and Wasm app executables have identical SHA-256 values'
+        let self_sample = checked $helper --self | from json
+        if $self_sample.physical_footprint_bytes <= 0 or $self_sample.resident_bytes <= 0 {
+            error make {
+                msg: 'resource-usage helper self-check returned an empty measurement'
+            }
         }
+        let native = prepare-app $native_app ($work | path join native.app)
+        let wasm = prepare-app $wasm_app ($work | path join wasm.app)
+        if $native.executable_sha256 == $wasm.executable_sha256 {
+            error make {
+                msg: 'native-only and Wasm app executables have identical SHA-256 values'
+            }
+        }
+        let variants = {native: $native, wasm: $wasm}
+        let guest = $wasm.app | path join Contents Resources plugins calculator.wasm
+        if not ($guest | path exists) or ($native.app | path join Contents Resources plugins calculator.wasm | path exists) {
+            error make {msg: 'expected a calculator module only in the Wasm bundle'}
+        }
+        {
+            ok: true
+            variants: $variants
+            calculator_sha256: (sha256 $guest)
+        }
+    } catch {|error|
+        {ok: false, problem: $error.msg}
     }
-    let variants = {native: $native, wasm: $wasm}
-    let guest = $wasm.app | path join Contents Resources plugins calculator.wasm
-    if not ($guest | path exists) or ($native.app | path join Contents Resources plugins calculator.wasm | path exists) {
-        error make {msg: 'expected a calculator module only in the Wasm bundle'}
+    if not $preparation.ok {
+        {
+            metadata: $metadata
+            outcome: $preparation
+            measurements: []
+        }
+        | to json
+        | save ($output | path join results.json)
+        rm --recursive --force $work
+        error make {msg: $"measurement setup failed: ($preparation.problem)"}
     }
-    let provenance = $metadata | insert bundles $variants | insert calculator_sha256 (sha256 $guest)
+    let variants = $preparation.variants
+    let provenance = $metadata | insert bundles $variants | insert calculator_sha256 $preparation.calculator_sha256
     $provenance | to json | save --force ($output | path join metadata.json)
     let journal = $output | path join measurements.jsonl
     '' | save $journal
