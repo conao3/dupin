@@ -9,6 +9,7 @@ Dupin reads `$XDG_CONFIG_HOME/dupin/config.toml`, or `~/.config/dupin/config.tom
 ```toml
 hotkey = "cmd+space" # modifiers cmd, alt, ctrl, shift, joined with + to a key
 file_limit = 200 # the most files a Spotlight search shows
+file_demotions = ["~/Library", "Caches", "node_modules", ".git", "target", "build", "dist"]
 dictionary_keywords = ["define", "d"] # type any keyword, then Space, to look up a word
 display = "mouse" # "mouse", "main", or "active"
 position = "center" # "center" puts the field at the middle of the display; "top" near its top
@@ -28,6 +29,30 @@ Choose **Relaunch** in Settings → General to restart Dupin. File edits reload 
 ## Display selection
 
 Settings → General → Display chooses the screen afresh whenever the panel opens. `"mouse"` follows the pointer, `"main"` uses the primary display configured in System Settings → Displays, and `"active"` uses the screen holding most of the focused window. Active mode reads the system-wide focused window through Accessibility; it never requests access automatically. If access or a focused window is unavailable, the panel uses the main display and reports the fallback. The query field is positioned within the selected screen’s visible area, avoiding its menu bar and Dock; results retain their existing downward growth.
+
+## Web searches
+
+The default keywords are `g` (Google), `gh` (GitHub) and `yt` (YouTube). Define `web_searches` to replace that set, or set it to `{}` to disable web searches. Each entry has a display name and an HTTP or HTTPS URL template with exactly one `{query}` in its path, query or fragment. Dupin encodes the text as UTF-8 URL data; it does not treat typed characters as URL syntax. Templates cannot contain credentials or put the placeholder in the origin.
+
+```toml
+web_fallbacks = ["gh"]
+
+[web_searches.gh]
+name = "GitHub"
+url = "https://github.com/search?q={query}"
+
+[web_searches.docs]
+name = "Rust documentation"
+url = "https://doc.rust-lang.org/std/?search={query}"
+```
+
+Keywords contain up to 32 ASCII letters, digits, underscores or hyphens, and are case-sensitive. `in` and configured Dictionary aliases keep their existing meaning. Invalid or conflicting web entries are skipped with a notice; valid entries still work. Optional `web_fallbacks` lists keywords in display order (up to 20), shown only when app-mode providers finish without a match. It defaults to `[]`. Changes apply live to the active search; no browser is opened by a configuration reload.
+
+## File ranking
+
+File-name search gathers up to four times `file_limit` candidates, ranks them, then applies the display limit. Both limits are capped at 10,000; zero displays no results. Better candidates can replace early results while the search runs. Selecting a row or opening its actions keeps that file available even if it falls below the normal display cut.
+
+`file_demotions` lowers the rank of noisy directories without excluding them. Absolute paths and `~/` paths match directory prefixes; relative entries match directory-component sequences, ignoring case. Entries do not match file names, and an empty list disables these demotions. Edits reload automatically and refresh an active file-name search. Content search keeps Spotlight's order and does not use these rules.
 
 ## Updates
 

@@ -4,6 +4,8 @@
 
 pub mod command;
 pub mod config;
+pub mod file_query;
+pub mod file_rank;
 pub mod fuzzy;
 pub mod history;
 pub mod item;

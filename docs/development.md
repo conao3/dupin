@@ -66,20 +66,7 @@ Stop a box when finished; the idle timeout is a fallback and the workflow has a
 four-hour limit. CLI builds and workflow checks do not prove that remote
 authentication, warmup or native E2E succeeded.
 
-## Nix layout
-
-| File                      | Holds                                                                                                                       |
-| ------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `flake.nix`               | Inputs and the flake-parts modules below                                                                                    |
-| `package.nix`             | The Dupin package (`callPackage` style), with `Dupin.app` around the binary and its icon drawn from `assets/logo/dupin.svg` |
-| `default.nix`             | `package.nix` for non-flake use                                                                                             |
-| `nix/packages.nix`        | `packages.dupin`, `packages.default` and `packages.blacksmith`                                                              |
-| `nix/cargo-artifacts.nix` | Compiled release/debug dependency caches and the flake's app and Clippy/test builds                                         |
-| `nix/blacksmith.nix`      | The pinned Testbox CLI and its SSH/rsync tools                                                                              |
-| `nix/home-manager.nix`    | `homeManagerModules.default`: `programs.dupin`, see [Configuration](./configuration.md#nix)                                 |
-| `nix/checks.nix`          | Clippy and the tests in one debug build                                                                                     |
-| `nix/treefmt.nix`         | The formatters and linters behind `nix fmt` and `checks.treefmt`                                                            |
-| `nix/dev-shell.nix`       | The development shell                                                                                                       |
+## Dependency builds
 
 The version lives in `VERSION` (see [releasing](./releasing.md)). `package.nix` holds the hash of the vendored Cargo dependencies; after `Cargo.lock` changes, refresh it with `nu scripts/update-cargo-hash.nu` (nix-update). The vendor derivation's name carries `Cargo.lock`'s hash, so a stale hash fails the next local build instead of only CI. On every pull request, the autofix.ci workflow runs the same script and pushes the refreshed hash.
 
@@ -103,6 +90,52 @@ nu scripts/snap.nu
 ```
 
 The renders show real results from the machine, file paths included, so they stay out of the repository. Headless renders draw the panel's plain card where a window shows Liquid Glass.
+
+## Native E2E evidence
+
+CI collects screenshots and any MP4, MOV or WebM recordings in `e2e-media`, with
+logs and detailed replies in `e2e`. The reporting workflow uses the same body
+for PR comments and commit comments: images render inline and recordings use
+GitHub's video player. Existing `e2e-screenshots` runs remain readable.
+
+Automatic attachment uploads need the optional repository secret
+`E2E_ASSET_TOKEN`, containing an accepted GitHub OAuth or personal access token
+with write access to the repository. The ordinary `GITHUB_TOKEN` can post the
+comment but currently cannot upload user attachments. No upload credential is
+created automatically. Without it, or if the upload fails, the comment retains
+the media download and logs. Inline uploads are limited to runs whose source
+repository is this repository; fork PRs keep the download link rather than
+publishing contributor-controlled files under the upload account.
+
+The privileged reporting job checks out only the default branch and never runs
+PR code. Its uploader accepts top-level regular media files with safe names and
+matching signatures, up to 50 files, 10 MB per image or 100 MB per video; GitHub
+may impose a lower account limit. Uploaded URLs must belong to GitHub's
+attachment service. Optional setup, download and upload operations have bounded
+timeouts so they leave time to post the result and fallback links. The raw
+upload protocol follows GitHub CLI 2.104.0 and is
+not a documented REST contract, so compatibility failures use the same fallback.
+
+For local inspection, the uploader defaults to a JSON manifest without network
+access. Explicit upload reads `GH_TOKEN` from the caller's environment:
+
+```sh
+nu scripts/e2e-assets.nu x-ryoppippi/dupin target/e2e
+nu scripts/e2e-assets.nu x-ryoppippi/dupin target/e2e --upload
+nu scripts/tests/e2e-assets.nu
+```
+
+The native CI suite also records the first 45 seconds of its real interaction:
+summoning the panel, typing the search term character by character, showing the
+results and opening Calculator. `--record` uses the runner's existing Screen
+Recording grant; it does not request or change permissions. It waits for the
+FFmpeg AVFoundation capture to encode its first frame before sending keys. It
+captures the screen without audio, writes a bounded 45-second H.264 MP4, and
+checks its duration and frame count before attaching it. A process deadline
+bounds capture failures; logs and rejected footage remain in the full artifact,
+including after a scenario failure. Local runs record only when explicitly
+given `--record`; use a disposable machine. Native capture and encoding must be
+verified by CI.
 
 ## Peak memory
 
@@ -137,8 +170,6 @@ Hawk archive and its analysis compiler together in `nix/cargo-hawk.nix`.
 from closed-workspace visibility decisions. Those libraries define plugin and
 host contracts, including consumers in separate experiment workspaces, so this
 workspace's callers cannot establish their complete public API requirements.
-The host's provider registration entry point also remains public; its precise
-`expect` entry in `hawk.toml` fails if the exception becomes stale.
 
 ## Logo
 
@@ -153,7 +184,7 @@ just website::install # dependencies from the lockfile
 just website::dev     # local server, rendering the real pages
 just website::preview # build, then serve the result with the redirects
 just website::lint    # oxlint, type-aware and type-checked through tsrs
-just website::deploy  # cf build, then upload the result as Cloudflare static assets
+just website::deploy  # build and deploy the Worker and its static assets
 ```
 
 Building and deploying go through `cf`, with the Cloudflare Vite plugin producing the Build Output. Workers Builds runs `pnpm run deploy` on `main` (the `dupin` Worker on `dupin.app`) and `cf previews deploy` on other branches, whenever `website/` or `assets/logo/` changes. `dupin.app/gh` redirects to the repository; the redirects are declared in `website/vite.config.ts`.
