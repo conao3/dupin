@@ -33,6 +33,7 @@ pub struct Permit {
 }
 
 #[derive(Debug)]
+#[must_use]
 pub enum Access {
     Allowed(Permit),
     MissingPlugin,
@@ -215,6 +216,7 @@ impl Policy {
         })
     }
 
+    #[must_use]
     pub fn validate(&self, permit: &Permit, cap: Capability) -> bool {
         if permit.capability != cap {
             return false;

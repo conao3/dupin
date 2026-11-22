@@ -104,12 +104,18 @@ fn revocation_invalidates_only_the_affected_capability_and_cannot_be_undone() {
     policy.set_calendar_consent(Consent::Allowed);
     let copy = permit(&policy, &plugin, ClipboardWrite);
     let calendar = permit(&policy, &plugin, CalendarRead);
+    policy.set_enabled(&plugin, true);
+    policy.set_grant(&plugin, CalendarRead, true);
+    assert!(policy.validate(&copy, ClipboardWrite));
+    assert!(policy.validate(&calendar, CalendarRead));
     policy.set_grant(&plugin, CalendarRead, false);
     assert!(!policy.validate(&calendar, CalendarRead));
     assert!(policy.validate(&copy, ClipboardWrite));
     policy.set_grant(&plugin, CalendarRead, true);
     assert!(!policy.validate(&calendar, CalendarRead));
     assert!(policy.validate(&permit(&policy, &plugin, CalendarRead), CalendarRead));
+    policy.update(&plugin, [ClipboardWrite]);
+    assert!(policy.validate(&copy, ClipboardWrite));
 }
 
 #[test]

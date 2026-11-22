@@ -24,8 +24,9 @@ access. Clipboard write requires a plugin grant but has no calendar consent gate
 
 An allowed operation receives an opaque permit. Before releasing an asynchronous
 completion or performing its effect, the broker must call `validate` with the
-permit and the required capability, after refreshing relevant OS consent. The host must prevent policy changes between validation and dispatch. The policy cannot undo an effect already
-performed by the OS.
+permit and the required capability, after refreshing relevant OS consent. The
+host must prevent policy changes between validation and dispatch. The policy
+cannot undo an effect already performed by the OS.
 
 Revocation invalidates outstanding permits for that capability. Disabling
 invalidates every permit for the plugin. Re-enabling or granting access again does

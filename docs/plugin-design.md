@@ -108,6 +108,10 @@ manifest/package registration, runtime integration, plugin grants, capability
 brokerage, production cancellation/deadlines, action invocation and streaming
 still need implementation and review before external plugins run.
 
+The [in-memory permission policy](plugin-permissions.md) implements separate
+plugin grants, OS consent and revocable operation permits. It is not yet wired
+to a broker or the launcher.
+
 ## Views, actions and saved state
 
 The launcher currently renders the shared Text, Detail and Pair data model per
