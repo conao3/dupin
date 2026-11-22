@@ -72,7 +72,7 @@ impl Provider for SystemProvider {
                 })
             })
             .collect();
-        items.sort_by(|a, b| b.score.cmp(&a.score));
+        items.sort_by_key(|item| std::cmp::Reverse(item.score));
         items.truncate(request.limit);
         if !request.is_cancelled() {
             emit(items);
