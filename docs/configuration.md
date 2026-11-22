@@ -125,3 +125,5 @@ If the hotkey can't be registered, Dupin doesn't fail silently. It:
 It also names a macOS shortcut that holds the chord (Spotlight's, for one), which registers without an error but would take the key first.
 
 One case can't be detected: another app holding the chord through a non-exclusive registration, as Raycast and Alfred can. macOS accepts both registrations and delivers the key to only one of them, which is why step 2 above matters.
+
+Dictionary is disabled by default. Enable Dictionary in Settings → Plugins to use its keyword lookups. Grant **Open in Dictionary** separately to use that action; enabling lookup does not grant URL access.

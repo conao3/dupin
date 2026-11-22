@@ -94,3 +94,5 @@ grant, the query remains in place and the panel explains where to enable copying
 Currency conversion is not available in the launcher yet.
 
 You can also paste a complete query such as `in release notes` or `d serendipity` into app search. Dupin accepts the same keywords and configured aliases, switches mode, and leaves the search term in the input.
+
+Dictionary is disabled by default. Enable Dictionary in Settings → Plugins to use its keyword lookups. Grant **Open in Dictionary** separately to use that action; enabling lookup does not grant URL access.

@@ -2,7 +2,7 @@
 
 use std::ptr::NonNull;
 
-use dupin_core::{Action, Item, ItemAction, Provider, ProviderError, Request, View};
+use dupin_core::{Action, CommandId, Item, ItemAction, Provider, ProviderError, Request, View};
 use objc2_core_foundation::{CFRange, CFRetained, CFString};
 
 #[repr(C)]
@@ -20,12 +20,16 @@ unsafe extern "C-unwind" {
 }
 
 pub struct DictionaryProvider {
+    command: CommandId,
     lookup: fn(&str) -> Option<String>,
 }
 
-impl Default for DictionaryProvider {
-    fn default() -> Self {
-        Self { lookup: definition }
+impl DictionaryProvider {
+    pub fn new(command: CommandId) -> Self {
+        Self::with_lookup(command, definition)
+    }
+    pub fn with_lookup(command: CommandId, lookup: fn(&str) -> Option<String>) -> Self {
+        Self { command, lookup }
     }
 }
 
@@ -39,7 +43,7 @@ impl Provider for DictionaryProvider {
             return Ok(());
         };
         if !request.is_cancelled() {
-            emit(vec![item(term, definition)]);
+            emit(vec![item(&self.command, term, definition)]);
         }
         Ok(())
     }
@@ -65,7 +69,7 @@ fn full_range(text: &CFString) -> CFRange {
     }
 }
 
-fn item(term: &str, definition: String) -> Item {
+fn item(command: &CommandId, term: &str, definition: String) -> Item {
     Item {
         id: format!("dictionary:{term}"),
         view: View::Detail {
@@ -82,7 +86,12 @@ fn item(term: &str, definition: String) -> Item {
         actions: vec![ItemAction::new(
             "open-dictionary",
             "Open in Dictionary",
-            Action::OpenUrl(dictionary_url(term)),
+            Action::Plugin {
+                command: command.clone(),
+                operation: dupin_plugin_protocol::Operation::OpenUrl {
+                    url: dictionary_url(term),
+                },
+            },
         )],
     }
 }
@@ -117,6 +126,7 @@ mod tests {
     #[test]
     fn provider_returns_the_definition_from_its_lookup() {
         let provider = DictionaryProvider {
+            command: CommandId::new("dictionary.lookup").unwrap(),
             lookup: fixture_definition,
         };
         let request = Request::detached("serendipity", 1);
@@ -133,6 +143,7 @@ mod tests {
     #[test]
     fn zero_limit_does_not_lookup_or_emit() {
         let provider = DictionaryProvider {
+            command: CommandId::new("dictionary.lookup").unwrap(),
             lookup: |_| panic!("zero limit must skip lookup"),
         };
         provider
@@ -144,14 +155,23 @@ mod tests {
 
     #[test]
     fn definition_result_displays_the_definition_and_opens_dictionary() {
-        let item = item("serendipity", "The occurrence of events by chance.".into());
+        let item = item(
+            &CommandId::new("dictionary.lookup").unwrap(),
+            "serendipity",
+            "The occurrence of events by chance.".into(),
+        );
         assert!(!item.record_usage);
         assert_eq!(item.display_title(), "serendipity");
         assert_eq!(detail_body(&item), "The occurrence of events by chance.");
         assert_eq!(item.primary, None);
         assert_eq!(
             item.action("open-dictionary"),
-            Some(&Action::OpenUrl("dict://serendipity".into()))
+            Some(&Action::Plugin {
+                command: CommandId::new("dictionary.lookup").unwrap(),
+                operation: dupin_plugin_protocol::Operation::OpenUrl {
+                    url: "dict://serendipity".into()
+                }
+            })
         );
         assert_eq!(item.alternate, None);
     }

@@ -229,7 +229,7 @@ fresh queries and dismissal clear them. These trusted native contracts provide
 neither guest isolation nor capability grants. Resource accounting and suspension
 remain future work.
 
-The current Calculator and System registrations consume manifest schema version 1,
+The current Calculator, System and Dictionary registrations consume manifest schema version 2,
 independent of wire version 4 and private ABI 1. Bundled JSON is validated before
 registration, Settings or policy installation. Capability IDs are canonical names
 of typed privileges and cannot be reassigned by a manifest update. New declarations
@@ -238,6 +238,4 @@ actions reach the UI, with grants checked again by the broker.
 
 This is a contract for trusted bundled registration, not identity authentication,
 a plugin loader or a sandbox for arbitrary native code. Backend selection belongs
-to the host. Apps, Files and Dictionary can adopt the same identity, query and
-view contract in subsequent migrations; their operations and permissions are not
-added here. Issue #96 remains incomplete.
+to the host. Keyword routing declares aliases, query presentation and deadlines; default routing preserves ordinary search ordering. The host adapts legacy dictionary_keywords to the Dictionary keyword route. Apps and Files can adopt the same identity, query and view contract in subsequent migrations.

@@ -1,7 +1,7 @@
 use crate::{Operation, SystemCommand, View};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Capability {
@@ -79,6 +79,21 @@ pub struct CapabilityDescriptor {
     pub kind: Capability,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum Routing {
+    Default,
+    Keyword {
+        aliases: Vec<String>,
+        placeholder: String,
+        chip: String,
+        empty_hint: String,
+        no_results_hint: String,
+        show_searching: bool,
+        backdrop: u8,
+        deadline_seconds: u32,
+    },
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Manifest {
     pub schema_version: u32,
@@ -89,6 +104,7 @@ pub struct Manifest {
     pub command: String,
     pub entrypoint: String,
     pub eligibility: Eligibility,
+    pub routing: Routing,
     pub result_limit: u32,
     pub default_enabled: bool,
     pub capabilities: Vec<CapabilityDescriptor>,
@@ -139,6 +155,29 @@ impl Manifest {
             || self.result_limit > crate::MAX_RESULTS
         {
             return Err("invalid manifest metadata");
+        }
+        if let Routing::Keyword {
+            aliases,
+            placeholder,
+            chip,
+            empty_hint,
+            no_results_hint,
+            backdrop,
+            deadline_seconds,
+            ..
+        } = &self.routing
+            && (aliases.is_empty()
+                || aliases.len() > 16
+                || aliases.iter().any(|a| !text(a, 128) || a.trim() != a)
+                || aliases.iter().collect::<BTreeSet<_>>().len() != aliases.len()
+                || ![placeholder, chip, empty_hint, no_results_hint]
+                    .iter()
+                    .all(|s| text(s, 256))
+                || *backdrop > 16
+                || *deadline_seconds == 0
+                || *deadline_seconds > 30)
+        {
+            return Err("invalid keyword routing");
         }
         if self.capabilities.len() > 16
             || self.views.is_empty()
@@ -251,10 +290,33 @@ mod tests {
         }));
     }
     #[test]
+    fn routing_metadata_is_required_bounded_and_strict() {
+        let mut v: serde_json::Value =
+            serde_json::from_slice(include_bytes!("../../dupin/src/dictionary-manifest.json")).unwrap();
+        assert!(decode(&v).is_ok());
+        for (key, value) in [
+            ("deadline_seconds", 0.into()),
+            ("backdrop", 17.into()),
+            ("aliases", serde_json::json!([])),
+            ("chip", "".into()),
+            ("future", true.into()),
+        ] {
+            let mut bad = v.clone();
+            bad["routing"][key] = value;
+            assert!(decode(&bad).is_err());
+        }
+        v.as_object_mut().unwrap().remove("routing");
+        assert!(decode(&v).is_err());
+        v["schema_version"] = 1.into();
+        assert!(decode(&v).is_err());
+    }
+
+    #[test]
     fn current_manifests_roundtrip() {
         for bytes in [
             include_bytes!("../../dupin/src/calculator-manifest.json").as_slice(),
             include_bytes!("../../dupin/src/system-manifest.json").as_slice(),
+            include_bytes!("../../dupin/src/dictionary-manifest.json").as_slice(),
         ] {
             let m = Manifest::decode(bytes).unwrap();
             assert_eq!(m.encode(), Manifest::decode(&m.encode()).unwrap().encode());

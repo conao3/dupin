@@ -1,0 +1,38 @@
+{
+	"schema_version": 2,
+	"id": "dictionary",
+	"title": "Dictionary",
+	"description": "Look up words with Dictionary Services",
+	"plugin_version": "1",
+	"command": "dictionary.lookup",
+	"entrypoint": "lookup",
+	"eligibility": "nonempty",
+	"result_limit": 1,
+	"default_enabled": false,
+	"capabilities": [
+		{
+			"id": "open-url:dict:",
+			"title": "Open in Dictionary",
+			"description": "Open a lookup in Dictionary",
+			"kind": {
+				"open-url": {
+					"scheme": "dict",
+					"host": null
+				}
+			}
+		}
+	],
+	"views": ["detail"],
+	"actions": ["open_url"],
+	"routing": {
+		"kind": "keyword",
+		"aliases": ["define", "d"],
+		"placeholder": "Look up a word",
+		"chip": "Define",
+		"empty_hint": "Type a word  \u00b7  \u232b back to apps",
+		"no_results_hint": "No definition found",
+		"show_searching": true,
+		"backdrop": 3,
+		"deadline_seconds": 30
+	}
+}

@@ -3,7 +3,7 @@
 	"title": "System Commands",
 	"description": "Trusted in-process native reference plugin for sleep and screen locking",
 	"command": "system.commands",
-	"schema_version": 1,
+	"schema_version": 2,
 	"plugin_version": "1",
 	"entrypoint": "system",
 	"eligibility": "nonempty",
@@ -24,5 +24,8 @@
 		}
 	],
 	"views": ["text"],
-	"actions": ["sleep", "lock_screen"]
+	"actions": ["sleep", "lock_screen"],
+	"routing": {
+		"kind": "default"
+	}
 }

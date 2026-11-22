@@ -3,7 +3,7 @@
 	"title": "Calculator",
 	"description": "Arithmetic and unit conversions alongside app search",
 	"command": "calculator.evaluate",
-	"schema_version": 1,
+	"schema_version": 2,
 	"plugin_version": "1",
 	"entrypoint": "calculator",
 	"eligibility": "nonempty",
@@ -18,5 +18,8 @@
 		}
 	],
 	"views": ["pair"],
-	"actions": ["copy_text"]
+	"actions": ["copy_text"],
+	"routing": {
+		"kind": "default"
+	}
 }
