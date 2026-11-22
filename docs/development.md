@@ -20,18 +20,65 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo run -p dupin-mac --example search -- in invoice # a provider from the terminal: apps, files or in
 ```
 
+For isolated local Cargo cache measurements, see the
+[Cargo cache experiment](../experiments/cargo-cache/README.md). It compares
+sccache across fresh and reused target directories without changing the
+development shell or Nix package cache.
+
+## Remote development with Testbox
+
+The development shell includes Blacksmith CLI 0.5.3. The manually dispatched
+`testbox-dev.yml` workflow compiles native test dependencies on a disposable Apple
+silicon runner, then keeps it available for commands. It follows ccusage's
+Testbox setup and uses the same macOS runner and Nix setup as CI.
+
+After this workflow is available on the repository's default branch, start a box
+from the root of the worktree you want to test:
+
+```sh
+blacksmith auth status
+blacksmith --org <account> testbox warmup .github/workflows/testbox-dev.yml \
+  --ref <pushed-branch> --job dev --idle-timeout 15
+blacksmith --org <account> testbox run --id <id> \
+  'nix develop --command cargo clippy --workspace --all-targets -- -D warnings'
+blacksmith --org <account> testbox run --id <id> \
+  'nix develop --command cargo test --workspace'
+blacksmith --org <account> testbox stop --id <id>
+```
+
+Use the Blacksmith account connected to this repository. Each agent or worktree
+gets its own box and ID. Run commands from the worktree root: the CLI mirrors
+that directory with `rsync --delete`, including tracked and untracked files
+that Git does not ignore. Ignored build directories stay on the runner. Check
+which files will be exported before the first run; a Git-ignored file is not
+evidence that every other local file is safe to send.
+
+Use Cargo directly for iteration. Synced new files are present on disk but are
+not added to the remote Git index, so a Git flake build can omit them. Cargo
+reads them directly and reuses the box's ignored `target/` between runs. Push
+new Nix inputs before warming a ref that needs them.
+
+The box holds its own configuration and build outputs. Native E2E additionally
+needs agent-desktop and the disposable runner's accessibility, automation and
+screen recording grants; this workflow does not configure or verify those.
+
+Stop a box when finished; the idle timeout is a fallback and the workflow has a
+four-hour limit. CLI builds and workflow checks do not prove that remote
+authentication, warmup or native E2E succeeded.
+
 ## Nix layout
 
-| File                   | Holds                                                                                                                                                 |
-| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `flake.nix`            | Inputs and the flake-parts modules below                                                                                                              |
-| `package.nix`          | The Dupin package (`callPackage` style), with `Dupin.app` around the binary and its icon drawn from `assets/logo/dupin.svg`                           |
-| `default.nix`          | `package.nix` for non-flake use                                                                                                                       |
-| `nix/packages.nix`     | `packages.dupin`, `packages.dupin-no-wasm`, `packages.calculator-plugin`, `packages.currency-guest`, `packages.minimal-plugin` and `packages.default` |
-| `nix/home-manager.nix` | `homeManagerModules.default`: `programs.dupin`, see [Configuration](./configuration.md#nix)                                                           |
-| `nix/checks.nix`       | Clippy and the tests in one debug build                                                                                                               |
-| `nix/treefmt.nix`      | The formatters and linters behind `nix fmt` and `checks.treefmt`                                                                                      |
-| `nix/dev-shell.nix`    | The development shell                                                                                                                                 |
+| File                   | Holds                                                                                                                                                                        |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `flake.nix`            | Inputs and the flake-parts modules below                                                                                                                                     |
+| `package.nix`          | The Dupin package (`callPackage` style), with `Dupin.app` around the binary and its icon drawn from `assets/logo/dupin.svg`                                                  |
+| `default.nix`          | `package.nix` for non-flake use                                                                                                                                              |
+| `nix/packages.nix`     | `packages.dupin`, `packages.dupin-no-wasm`, `packages.calculator-plugin`, `packages.currency-guest`, `packages.minimal-plugin`, `packages.blacksmith` and `packages.default` |
+| `nix/blacksmith.nix`   | The pinned Testbox CLI and its SSH/rsync tools                                                                                                                               |
+| `nix/home-manager.nix` | `homeManagerModules.default`: `programs.dupin`, see [Configuration](./configuration.md#nix)                                                                                  |
+| `nix/checks.nix`       | Clippy and the tests in one debug build                                                                                                                                      |
+| `nix/treefmt.nix`      | The formatters and linters behind `nix fmt` and `checks.treefmt`                                                                                                             |
+| `nix/dev-shell.nix`    | The development shell                                                                                                                                                        |
 
 The version lives in `VERSION` (see [releasing](./releasing.md)). `package.nix` holds the hash of the root workspace's vendored Cargo dependencies; after `Cargo.lock` changes, refresh it with `nu scripts/update-cargo-hash.nu` (nix-update). The standalone Wasm guest workspaces have their own locks and fixed-output hashes. Refresh those from their wrapper files:
 
@@ -75,6 +122,25 @@ nu scripts/footprint.nu
 `DUPIN_TRACE=1` prints when the launch hotkey is registered and, for each summon, when the hotkey handler ran and when the next frame was drawn, with wall-clock times to line up with an outside measurement of when the window reached the screen.
 
 Scripts in this repository are written in Nushell.
+
+## Rust visibility
+
+`just hawk` checks workspace API visibility and fails on warnings. The same
+command runs in `nix build .#checks.aarch64-darwin.hawk`, which CI includes
+alongside its existing checks. `hawk.toml` identifies the distributed launcher
+as the production binary.
+
+Hawk 0.1.18 uses a private Rust 1.100.0 analysis toolchain. Its compiler-internal
+API requires that exact toolchain; `cargo-hawk` selects it without changing the
+compiler used by ordinary Cargo commands or the packaged launcher. Update the
+Hawk archive and its analysis compiler together in `nix/cargo-hawk.nix`.
+
+`scripts/hawk.nu` excludes the plugin protocol, runtime and policy libraries
+from closed-workspace visibility decisions. Those libraries define plugin and
+host contracts, including consumers in separate experiment workspaces, so this
+workspace's callers cannot establish their complete public API requirements.
+The host's provider registration entry point also remains public; its precise
+`expect` entry in `hawk.toml` fails if the exception becomes stale.
 
 ## Logo
 

@@ -2,6 +2,7 @@
   perSystem =
     { pkgs, ... }:
     let
+      blacksmith = pkgs.callPackage ./blacksmith.nix { };
       calculator-plugin = pkgs.callPackage ./calculator-plugin.nix { };
       currency-guest = pkgs.callPackage ./currency-guest.nix { };
       minimal-plugin = pkgs.runCommand "dupin-minimal-plugin" { nativeBuildInputs = [ pkgs.wabt ]; } ''
@@ -31,6 +32,7 @@
         inherit
           dupin
           dupin-no-wasm
+          blacksmith
           dmg-background
           calculator-plugin
           currency-guest

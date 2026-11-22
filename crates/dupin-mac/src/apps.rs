@@ -11,21 +11,23 @@ use std::time::SystemTime;
 use dupin_core::fuzzy;
 use dupin_core::{Item, Provider, ProviderError, Request, View};
 
+pub type AppsWatcher = crate::watcher::PathWatcher;
+
 /// How deep to look for bundles below a root: `/Applications/Utilities/X.app` is depth 2.
 const MAX_DEPTH: usize = 2;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct App {
+struct App {
     /// The name Finder shows: localized, without `.app`.
-    pub name: String,
+    name: String,
     /// Other names that should find the app: the file name when it differs from `name`, and
     /// Spotlight's alternate names and keywords (ChatGPT.app answers to "Codex", its former
     /// name; System Settings to "System Preferences").
-    pub aliases: Vec<String>,
-    pub path: PathBuf,
+    aliases: Vec<String>,
+    path: PathBuf,
     /// The bundle behind a symlink (Safari lives in a Cryptex and /Applications links to
     /// it): Finder draws an alias badge on the link's icon but not on the bundle's.
-    pub icon: PathBuf,
+    icon: PathBuf,
 }
 
 pub struct AppsProvider {
@@ -54,7 +56,7 @@ impl AppsProvider {
         Self::with_roots(roots)
     }
 
-    pub fn with_roots(roots: Vec<PathBuf>) -> Self {
+    fn with_roots(roots: Vec<PathBuf>) -> Self {
         AppsProvider {
             roots,
             index: Mutex::new(None),
@@ -108,249 +110,6 @@ impl AppsProvider {
     }
 }
 
-/// Owns the event stream and its serial delivery queue.
-pub struct AppsWatcher {
-    stream: FSEventStreamRef,
-    queue: *mut std::ffi::c_void,
-    context: *mut WatchContext,
-    debounce: Option<std::thread::JoinHandle<()>>,
-}
-
-// SAFETY: the stream delivers only on its serial queue, and Drop drains that queue.
-unsafe impl Send for AppsWatcher {}
-
-impl AppsWatcher {
-    fn start(roots: Vec<PathBuf>, changed: impl Fn() + Send + Sync + 'static) -> Result<Self, &'static str> {
-        let (events, received) = std::sync::mpsc::channel();
-        let debounce = std::thread::Builder::new()
-            .name("dupin-app-watch-debounce".into())
-            .spawn(move || debounce_events(received, changed))
-            .map_err(|_| "could not spawn app watcher debounce")?;
-        match watch_roots(roots, events) {
-            Ok(mut watcher) => {
-                watcher.debounce = Some(debounce);
-                Ok(watcher)
-            }
-            Err(error) => {
-                let _ = debounce.join();
-                Err(error)
-            }
-        }
-    }
-}
-
-unsafe extern "C" fn drained(_: *mut std::ffi::c_void) {}
-
-impl Drop for AppsWatcher {
-    fn drop(&mut self) {
-        // Stop delivery and drain already queued callbacks before freeing their context.
-        unsafe {
-            FSEventStreamStop(self.stream);
-            FSEventStreamInvalidate(self.stream);
-            dispatch_sync_f(self.queue, std::ptr::null_mut(), drained);
-            FSEventStreamRelease(self.stream);
-            drop(Box::from_raw(self.context));
-            dispatch_release(self.queue);
-        }
-        if let Some(debounce) = self.debounce.take() {
-            let _ = debounce.join();
-        }
-    }
-}
-
-fn debounce_events(events: std::sync::mpsc::Receiver<()>, changed: impl Fn()) {
-    const QUIET: std::time::Duration = std::time::Duration::from_millis(300);
-    while events.recv().is_ok() {
-        loop {
-            match events.recv_timeout(QUIET) {
-                Ok(()) => continue,
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                    changed();
-                    break;
-                }
-                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
-            }
-        }
-    }
-}
-
-type CFTypeRef = *const std::ffi::c_void;
-type FSEventStreamRef = *mut std::ffi::c_void;
-type FSEventId = u64;
-type FSEventFlags = u32;
-type CFTimeInterval = f64;
-
-#[repr(C)]
-struct FSEventStreamContext {
-    version: isize,
-    info: *mut std::ffi::c_void,
-    retain: Option<unsafe extern "C" fn(*const std::ffi::c_void) -> *const std::ffi::c_void>,
-    release: Option<unsafe extern "C" fn(*const std::ffi::c_void)>,
-    copy_description: Option<unsafe extern "C" fn(*const std::ffi::c_void) -> CFTypeRef>,
-}
-
-struct WatchContext {
-    events: std::sync::mpsc::Sender<()>,
-    roots: Vec<PathBuf>,
-}
-
-type FSEventCallback = unsafe extern "C" fn(
-    FSEventStreamRef,
-    *mut std::ffi::c_void,
-    usize,
-    *mut std::ffi::c_void,
-    *const FSEventFlags,
-    *const FSEventId,
-);
-
-#[link(name = "CoreServices", kind = "framework")]
-unsafe extern "C" {
-    fn FSEventStreamCreate(
-        allocator: CFTypeRef,
-        callback: FSEventCallback,
-        context: *mut FSEventStreamContext,
-        paths: CFTypeRef,
-        since_when: FSEventId,
-        latency: CFTimeInterval,
-        flags: u32,
-    ) -> FSEventStreamRef;
-    fn FSEventStreamSetDispatchQueue(stream: FSEventStreamRef, queue: *mut std::ffi::c_void);
-    fn FSEventStreamStart(stream: FSEventStreamRef) -> u8;
-    fn FSEventStreamStop(stream: FSEventStreamRef);
-    fn FSEventStreamInvalidate(stream: FSEventStreamRef);
-    fn FSEventStreamRelease(stream: FSEventStreamRef);
-}
-
-unsafe extern "C" {
-    fn dispatch_queue_create(
-        label: *const std::ffi::c_char,
-        attr: *const std::ffi::c_void,
-    ) -> *mut std::ffi::c_void;
-    fn dispatch_sync_f(
-        queue: *mut std::ffi::c_void,
-        context: *mut std::ffi::c_void,
-        work: unsafe extern "C" fn(*mut std::ffi::c_void),
-    );
-    fn dispatch_release(object: *mut std::ffi::c_void);
-}
-
-fn watch_roots(
-    roots: Vec<PathBuf>,
-    events: std::sync::mpsc::Sender<()>,
-) -> Result<AppsWatcher, &'static str> {
-    use objc2::rc::Retained;
-    use objc2_foundation::{NSArray, NSString};
-
-    let roots: Vec<_> = roots.iter().map(|root| canonical_root(root)).collect();
-    let watched: Vec<_> = roots
-        .iter()
-        .map(|root| {
-            let mut path = root.as_path();
-            while !path.exists() {
-                let Some(parent) = path.parent() else { break };
-                path = parent;
-            }
-            path.to_owned()
-        })
-        .collect();
-    let paths: Vec<Retained<NSString>> = watched
-        .iter()
-        .filter_map(|path| path.to_str().map(NSString::from_str))
-        .collect();
-    if paths.is_empty() {
-        return Err("no application folders can be watched");
-    }
-    let paths = NSArray::from_retained_slice(&paths);
-    let context_info = Box::into_raw(Box::new(WatchContext { events, roots })).cast::<std::ffi::c_void>();
-    let mut context = FSEventStreamContext {
-        version: 0,
-        info: context_info,
-        retain: None,
-        release: None,
-        copy_description: None,
-    };
-    // FSEvents retains the roots while the stream is alive. The callback context stays allocated
-    // until the stream is invalidated below.
-    let stream = unsafe {
-        FSEventStreamCreate(
-            std::ptr::null(),
-            app_paths_changed,
-            &mut context,
-            objc2::rc::Retained::as_ptr(&paths).cast(),
-            u64::MAX,
-            0.5,
-            1,
-        )
-    };
-    if stream.is_null() {
-        // SAFETY: context_info was allocated immediately above and is still uniquely owned.
-        drop(unsafe { Box::from_raw(context_info.cast::<WatchContext>()) });
-        return Err("could not create the FSEvents stream");
-    }
-    let queue = unsafe { dispatch_queue_create(c"dupin-app-watch".as_ptr(), std::ptr::null()) };
-    if queue.is_null() {
-        unsafe {
-            FSEventStreamRelease(stream);
-            drop(Box::from_raw(context_info.cast::<WatchContext>()));
-        }
-        return Err("could not create app watcher queue");
-    }
-    unsafe { FSEventStreamSetDispatchQueue(stream, queue) };
-    let watcher = AppsWatcher {
-        stream,
-        queue,
-        context: context_info.cast(),
-        debounce: None,
-    };
-    if unsafe { FSEventStreamStart(stream) } == 0 {
-        return Err("could not start the FSEvents stream");
-    }
-    Ok(watcher)
-}
-
-unsafe extern "C" fn app_paths_changed(
-    _stream: FSEventStreamRef,
-    info: *mut std::ffi::c_void,
-    _count: usize,
-    paths: *mut std::ffi::c_void,
-    _flags: *const FSEventFlags,
-    _ids: *const FSEventId,
-) {
-    // SAFETY: the callback context lives until the stream is stopped and released.
-    let context = unsafe { &*info.cast::<WatchContext>() };
-    // SAFETY: UseCFTypes supplies an array of strings for the event paths.
-    let paths = unsafe { &*paths.cast::<objc2_foundation::NSArray>() };
-    if paths.iter().any(|path| {
-        path.downcast_ref::<objc2_foundation::NSString>()
-            .is_some_and(|path| {
-                let value = path.to_string();
-                let path = Path::new(&value);
-                context
-                    .roots
-                    .iter()
-                    .any(|root| path.starts_with(root) || root.starts_with(path))
-            })
-    }) {
-        let _ = context.events.send(());
-    }
-}
-
-fn canonical_root(root: &Path) -> PathBuf {
-    let mut existing = root;
-    let mut tail = Vec::new();
-    while !existing.exists() {
-        let Some(name) = existing.file_name() else { break };
-        tail.push(name.to_owned());
-        let Some(parent) = existing.parent() else { break };
-        existing = parent;
-    }
-    let mut path = fs::canonicalize(existing).unwrap_or_else(|_| existing.to_owned());
-    for name in tail.iter().rev() {
-        path.push(name);
-    }
-    path
-}
-
 impl AppsProvider {
     fn names_of(&self, bundle: &Path) -> Names {
         let modified = fs::metadata(bundle).and_then(|m| m.modified()).ok();
@@ -377,7 +136,7 @@ impl App {
     /// Take the displayed name and the extra names the system reports, keeping the file name
     /// as an alias when it differs. Names lose a trailing `.app`, and duplicates (ignoring
     /// case) and empty names are dropped.
-    pub fn with_names(self, display: &str, extra: Vec<String>) -> App {
+    fn with_names(self, display: &str, extra: Vec<String>) -> App {
         let clean = |n: &str| n.trim().trim_end_matches(".app").trim().to_owned();
         let display = clean(display);
         let name = if display.is_empty() {
@@ -405,7 +164,7 @@ const ALIAS_PENALTY: i32 = 8;
 
 /// Best matches first; equal scores keep the shorter, then alphabetical, name. An app matched
 /// through an alias shows the alias in its subtitle, since its title doesn't contain the query.
-pub fn rank(apps: &[App], query: &str, limit: usize) -> Vec<Item> {
+fn rank(apps: &[App], query: &str, limit: usize) -> Vec<Item> {
     let mut hits: Vec<(i32, Option<&str>, Vec<usize>, &App)> = apps
         .iter()
         .filter_map(|app| {
@@ -449,7 +208,7 @@ pub fn rank(apps: &[App], query: &str, limit: usize) -> Vec<Item> {
 
 /// Every `.app` under `roots`, one entry per name: the first root wins, so an app in
 /// `/Applications` hides a same-named copy further down the list.
-pub fn scan(roots: &[PathBuf]) -> Vec<App> {
+fn scan(roots: &[PathBuf]) -> Vec<App> {
     let mut apps = Vec::new();
     for root in roots {
         walk(root, 0, &mut apps);

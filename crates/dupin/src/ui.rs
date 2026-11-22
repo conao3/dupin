@@ -2,7 +2,9 @@
 //! field, icons, a notice). Handlers translate keys into session intents and carry out the
 //! effects the session returns.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -22,13 +24,28 @@ const ICON_CAP: usize = 512;
 const TOP_MARGIN: f32 = 180.0;
 pub const ICON_SIZE: f32 = 32.0;
 
+pub struct Configuration {
+    pub values: Rc<RefCell<Config>>,
+    pub hotkey: Arc<crate::hotkey::Binding>,
+    pub files: Arc<crate::settings::Service>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Restart {
+    Update,
+    Requested,
+}
+
 pub struct Ui {
     pub session: Session,
     pub query: TextEdit,
     /// A problem to show above the results until the panel next hides (a hotkey that
     /// couldn't be registered, a broken config file).
     pub notice: Option<String>,
+    pub config_problem: Option<String>,
     pub registration_notice: Option<String>,
+    configuration: Configuration,
+    acknowledged_config: Config,
     pub icons: HashMap<String, Image>,
     /// Between `show` and `hide`: the backdrop animates only then.
     pub shown: bool,
@@ -48,7 +65,8 @@ pub struct Ui {
     /// The input source to put back when the panel hides, if showing it switched one.
     restore_input: Option<dupin_mac::input_source::Previous>,
     /// An update was staged while the panel showed: restart into it when the panel hides.
-    relaunch: bool,
+    relaunch: Option<Restart>,
+    settings_after_close: bool,
     /// Actions handed to Launch Services that haven't returned yet; a relaunch waits for them.
     running: Arc<AtomicUsize>,
     updater: crate::update::Updater,
@@ -61,10 +79,11 @@ impl Ui {
         me: AppHandle<Ui>,
         prefs: AppHandle<crate::prefs::Prefs>,
         updater: crate::update::Updater,
-        config: Config,
+        configuration: Configuration,
         history: History,
         notice: Option<String>,
     ) -> Ui {
+        let config = configuration.values.borrow().clone();
         let apps_provider = Arc::new(AppsProvider::standard());
         let plugins = crate::plugins::Services::new(&config);
         let registration = crate::commands::register(&config, apps_provider.clone(), &plugins)
@@ -107,11 +126,13 @@ impl Ui {
         let mut query = TextEdit::new("");
         query.focused = true;
         Ui {
+            acknowledged_config: config.clone(),
             session: Session::new(history, registration.registry)
                 .expect("built-in command registration is valid"),
             saver: crate::store::Saver::spawn(),
             query,
-            notice,
+            notice: None,
+            config_problem: notice,
             registration_notice: registration.notice,
             icons: HashMap::new(),
             shown: false,
@@ -125,9 +146,11 @@ impl Ui {
             plugins,
             _apps_watcher: apps_watcher,
             position: config.position,
-            input_source: config.input_source,
+            input_source: config.input_source.clone(),
+            configuration,
             restore_input: None,
-            relaunch: false,
+            relaunch: None,
+            settings_after_close: false,
             running: Arc::new(AtomicUsize::new(0)),
             updater,
             me,
@@ -135,9 +158,8 @@ impl Ui {
         }
     }
 
-    /// Settings changed in the settings window. The hotkey is the settings window's to
-    /// re-register; the rest takes effect from the next summon.
     pub fn apply_config(&mut self, config: &Config, tx: &mut Tx) {
+        let previous_limit = self.session.command().result_limit;
         self.plugins.apply_config(config);
         let registration =
             crate::commands::configured(config).expect("built-in command registration is valid");
@@ -147,6 +169,10 @@ impl Ui {
             .expect("built-in command registration is valid");
         self.apply(effects, tx);
         self.registration_notice = registration.notice;
+        if self.session.command().result_limit != previous_limit {
+            let effects = self.session.refresh();
+            self.apply(effects, tx);
+        }
         self.position = config.position;
         self.input_source = config.input_source.clone();
         self.updater.set_enabled(config.auto_update);
@@ -156,39 +182,104 @@ impl Ui {
         }
     }
 
-    /// An update is staged: restart into it now, or once neither the panel nor Settings shows.
-    pub fn updated(&mut self) {
-        self.restart_into_update(false);
+    pub fn reload_config(&mut self, update: crate::settings::Update, tx: &mut Tx) {
+        if update.revision != self.configuration.files.revision() {
+            return;
+        }
+        let previous = self.configuration.values.borrow().clone();
+        let (snapshot, read_problem) = reconcile_snapshot(
+            update.result,
+            &self.acknowledged_config,
+            update.save_problem.is_some(),
+        );
+        let accepted = snapshot.and_then(|config| {
+            accept_config(config, &previous, |shortcut| {
+                if self.configuration.hotkey.is_installed(shortcut) {
+                    Ok(())
+                } else {
+                    self.configuration.hotkey.replace(shortcut)
+                }
+            })
+        });
+        let problem = match accepted {
+            Ok(config) => {
+                self.acknowledged_config = config.clone();
+                if *self.configuration.values.borrow() != config {
+                    *self.configuration.values.borrow_mut() = config.clone();
+                    self.apply_config(&config, tx);
+                }
+                None
+            }
+            Err(error) => Some(error),
+        };
+        let problems: Vec<_> = [problem, read_problem, update.save_problem, update.watch_problem]
+            .into_iter()
+            .flatten()
+            .collect();
+        let problem = (!problems.is_empty()).then(|| problems.join("; "));
+        if self.config_problem != problem
+            && let Some(problem) = &problem
+        {
+            crate::log::warn(problem);
+        }
+        self.config_problem = problem.clone();
+        let config = self.configuration.values.borrow().clone();
+        self.prefs.update(move |prefs, _| {
+            prefs.reflect_config(update.revision, config, update.read_only, problem);
+        });
     }
 
-    /// Settings' "Restart to Update".
-    pub fn restart_to_update(&mut self) {
-        self.restart_into_update(true);
+    /// An update is staged: restart into it now, or once neither the panel nor Settings shows.
+    pub fn updated(&mut self, tx: &mut Tx) {
+        self.restart(Restart::Update, tx);
+    }
+
+    /// Settings' explicit relaunch, installing a staged update first when present.
+    pub fn relaunch(&mut self, tx: &mut Tx) {
+        self.restart(Restart::Requested, tx);
+    }
+
+    pub fn resume_restart(&mut self, tx: &mut Tx) {
+        if let Some(request) = self.relaunch.take() {
+            self.restart(request, tx);
+        }
     }
 
     /// The decision is made here, on the UI thread, so it sees the windows as they are now.
-    /// Unless asked, Settings showing defers the restart too: it would close under the user.
-    fn restart_into_update(&mut self, asked: bool) {
-        if self.me.is_visible() || (!asked && self.prefs.is_visible()) {
-            self.relaunch = true;
+    /// Automatic updates wait for both windows to hide; an explicit request closes them.
+    fn restart(&mut self, request: Restart, tx: &mut Tx) {
+        if request == Restart::Update && (self.me.is_visible() || self.prefs.is_visible()) {
+            self.relaunch = Some(request);
         } else if self.running.load(Ordering::Acquire) > 0 {
-            self.relaunch_when_idle(asked);
+            self.relaunch_when_idle(request);
         } else {
-            self.updater.restart();
+            match self.updater.install_staged() {
+                Ok(installed) => {
+                    if installed || request == Restart::Requested {
+                        tx.relaunch();
+                    }
+                }
+                Err(error) => {
+                    crate::log::warn(&error);
+                    if request == Restart::Requested {
+                        self.show_notice(error, tx);
+                    }
+                }
+            }
         }
     }
 
     /// Ask again once every action already handed off has been carried out, so exiting
     /// doesn't cut short the app or file the user just opened. The panel may have been
-    /// summoned meanwhile, so `restart_into_update` decides afresh.
-    fn relaunch_when_idle(&self, asked: bool) {
+    /// summoned meanwhile, so automatic updates check visibility again.
+    fn relaunch_when_idle(&self, request: Restart) {
         let running = self.running.clone();
         let me = self.me.clone();
         std::thread::spawn(move || {
             while running.load(Ordering::Acquire) > 0 {
                 std::thread::sleep(std::time::Duration::from_millis(50));
             }
-            me.update(move |s, _| s.restart_into_update(asked));
+            me.update(move |s, tx| s.restart(request, tx));
         });
     }
 
@@ -257,6 +348,13 @@ impl Ui {
         self.hide(tx);
     }
 
+    pub fn closed(&mut self, _: &mut Tx) {
+        if std::mem::take(&mut self.settings_after_close) {
+            crate::trace::settings("panel closed");
+            self.prefs.open();
+        }
+    }
+
     fn hide(&mut self, tx: &mut Tx) {
         if let Some(previous) = self.restore_input.take() {
             previous.restore();
@@ -265,8 +363,10 @@ impl Ui {
         self.shown = false;
         self.notice = None;
         tx.close_window();
-        if std::mem::take(&mut self.relaunch) {
-            self.relaunch_when_idle(false);
+        if !self.settings_after_close
+            && let Some(request) = self.relaunch.take()
+        {
+            self.relaunch_when_idle(request);
         }
     }
 
@@ -338,8 +438,9 @@ impl Ui {
                 return true;
             }
             Key::Command(',') => {
+                crate::trace::settings("requested");
+                self.settings_after_close = true;
                 self.dismiss(tx);
-                self.prefs.open();
                 return true;
             }
             _ => return false,
@@ -552,6 +653,35 @@ fn backdrop_source(pick: &Backdrop) -> crate::shader::Source {
     source
 }
 
+fn reconcile_snapshot(
+    snapshot: Result<Config, String>,
+    acknowledged: &Config,
+    save_failed: bool,
+) -> (Result<Config, String>, Option<String>) {
+    match snapshot {
+        Err(error) if save_failed => (Ok(acknowledged.clone()), Some(error)),
+        snapshot => (snapshot, None),
+    }
+}
+
+fn accept_config(
+    config: Config,
+    previous: &Config,
+    install: impl FnOnce(Option<&rune::Shortcut>) -> Result<(), rune::ShortcutError>,
+) -> Result<Config, String> {
+    let shortcut = crate::hotkey::parse(&config.hotkey).map_err(|_| {
+        "The hotkey in config.toml is invalid; keeping the previous configuration.".to_owned()
+    })?;
+    if let Err(error) = install(shortcut.as_ref())
+        && crate::hotkey::parse(&previous.hotkey).ok().as_ref() != Some(&shortcut)
+    {
+        return Err(format!(
+            "Couldn't apply the hotkey from config.toml: {error}; keeping the previous configuration."
+        ));
+    }
+    Ok(config)
+}
+
 fn take_due(deadlines: &mut HashMap<CommandId, (u64, f64)>, clock: f64) -> Vec<(CommandId, u64)> {
     let due: Vec<_> = deadlines
         .iter()
@@ -579,5 +709,53 @@ mod deadline_tests {
         deadlines.insert(id.clone(), (3, 30.0));
         deadlines.remove(&id);
         assert!(take_due(&mut deadlines, 30.0).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod config_tests {
+    use super::*;
+
+    #[test]
+    fn a_failed_save_and_invalid_snapshot_restore_acknowledged_values() {
+        let acknowledged = Config::default();
+        let (restored, problem) = reconcile_snapshot(Err("invalid TOML".into()), &acknowledged, true);
+        assert_eq!(restored, Ok(acknowledged.clone()));
+        assert_eq!(problem.as_deref(), Some("invalid TOML"));
+        let disk = Config {
+            file_limit: 30,
+            ..acknowledged.clone()
+        };
+        assert_eq!(
+            reconcile_snapshot(Ok(disk.clone()), &acknowledged, true),
+            (Ok(disk), None)
+        );
+        assert!(
+            reconcile_snapshot(Err("invalid TOML".into()), &acknowledged, false)
+                .0
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn an_unavailable_unchanged_hotkey_does_not_reject_other_settings() {
+        let previous = Config::default();
+        let changed = Config {
+            file_limit: 50,
+            ..previous.clone()
+        };
+        let accepted = accept_config(changed.clone(), &previous, |_| Err(rune::ShortcutError::Conflict));
+        assert_eq!(accepted, Ok(changed));
+    }
+
+    #[test]
+    fn an_unavailable_changed_hotkey_keeps_the_previous_config() {
+        let previous = Config::default();
+        let changed = Config {
+            hotkey: "ctrl+alt+k".into(),
+            file_limit: 50,
+            ..previous.clone()
+        };
+        assert!(accept_config(changed, &previous, |_| Err(rune::ShortcutError::Conflict)).is_err());
     }
 }

@@ -1,0 +1,4 @@
+[[production]]
+package = "dupin"
+bin = "dupin"
+reason = "the distributed launcher"

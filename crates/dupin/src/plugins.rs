@@ -225,13 +225,15 @@ impl Provider for GuestProvider {
                     actions: item
                         .actions
                         .into_iter()
-                        .map(|action| ItemAction {
-                            id: action.id,
-                            title: action.title,
-                            action: Action::Plugin {
-                                command: command.clone(),
-                                operation: action.operation,
-                            },
+                        .map(|action| {
+                            ItemAction::new(
+                                &action.id,
+                                &action.title,
+                                Action::Plugin {
+                                    command: command.clone(),
+                                    operation: action.operation,
+                                },
+                            )
                         })
                         .collect(),
                     record_usage: false,
