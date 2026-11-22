@@ -15,35 +15,29 @@ use dupin_core::{Action, Item, ItemAction};
 use dupin_core::{CommandId, Config, Provider};
 use dupin_core::{ProviderError, Request};
 use dupin_plugin_broker::{PrepareError, PreparedOperation};
-use dupin_plugin_policy::{Access, Capability, PluginHandle, Policy};
+use dupin_plugin_policy::{Access, PluginHandle, Policy};
 use dupin_plugin_protocol::Operation;
 #[cfg(feature = "wasm-runtime")]
 use dupin_plugin_protocol::{Outcome, VERSION};
 #[cfg(feature = "wasm-runtime")]
 use dupin_plugin_runtime::{GuestModule, HostError, MAX_MODULE_BYTES, QueryControl};
 
-pub struct CapabilityDescriptor {
-    pub id: &'static str,
-    pub title: &'static str,
-    pub description: &'static str,
-    kind: Capability,
-}
-
+use dupin_plugin_protocol::manifest::{Manifest, ValidatedManifest, validate_catalog};
 pub struct Descriptor {
-    pub id: &'static str,
-    pub title: &'static str,
-    pub description: &'static str,
-    pub command: &'static str,
-    pub default_enabled: bool,
-    pub capabilities: &'static [CapabilityDescriptor],
+    manifest: ValidatedManifest,
     backend: Backend,
+}
+impl std::ops::Deref for Descriptor {
+    type Target = ValidatedManifest;
+    fn deref(&self) -> &ValidatedManifest {
+        &self.manifest
+    }
 }
 
 enum Backend {
     NativeSystem,
     #[cfg(feature = "wasm-runtime")]
     Guest {
-        command: &'static str,
         module: &'static str,
     },
 }
@@ -51,55 +45,36 @@ enum Backend {
 pub const DEADLINE: Duration = Duration::from_secs(2);
 
 pub fn descriptors() -> &'static [Descriptor] {
-    static PLUGINS: &[Descriptor] = &[
-        #[cfg(feature = "wasm-runtime")]
-        Descriptor {
-            id: "calculator",
-            title: "Calculator",
-            description: "Arithmetic and unit conversions alongside app search",
-            command: "calculator.evaluate",
-            default_enabled: true,
-            backend: Backend::Guest {
-                command: "calculator",
-                module: "calculator.wasm",
+    static PLUGINS: std::sync::OnceLock<Vec<Descriptor>> = std::sync::OnceLock::new();
+    PLUGINS.get_or_init(|| {
+        let plugins = vec![
+            #[cfg(feature = "wasm-runtime")]
+            Descriptor {
+                manifest: Manifest::decode(include_bytes!("calculator-manifest.json"))
+                    .expect("valid calculator manifest"),
+                backend: Backend::Guest {
+                    module: "calculator.wasm",
+                },
             },
-            capabilities: &[CapabilityDescriptor {
-                id: "clipboard-write",
-                title: "Copy results",
-                description: "Allow this plugin to write a result to the clipboard when you choose Copy",
-                kind: Capability::ClipboardWrite,
-            }],
-        },
-        Descriptor {
-            id: "system",
-            title: "System Commands",
-            description: "Trusted in-process native reference plugin for sleep and screen locking",
-            command: "system.commands",
-            default_enabled: false,
-            backend: Backend::NativeSystem,
-            capabilities: &[
-                CapabilityDescriptor {
-                    id: "system-sleep",
-                    title: "Sleep",
-                    description: "Allow Sleep Now when explicitly selected",
-                    kind: Capability::SystemSleep,
-                },
-                CapabilityDescriptor {
-                    id: "system-lock-screen",
-                    title: "Lock screen",
-                    description: "Allow Lock Screen Now when explicitly selected",
-                    kind: Capability::SystemLockScreen,
-                },
-            ],
-        },
-    ];
-    PLUGINS
+            Descriptor {
+                manifest: Manifest::decode(include_bytes!("system-manifest.json"))
+                    .expect("valid system manifest"),
+                backend: Backend::NativeSystem,
+            },
+        ];
+        validate_catalog(
+            &plugins.iter().map(|p| p.manifest.clone()).collect::<Vec<_>>(),
+            &[],
+        )
+        .expect("unique bundled manifests");
+        plugins
+    })
 }
 
 pub fn settings(config: &Config, plugin: &Descriptor) -> PluginSettings {
     config
         .plugins
-        .get(plugin.id)
+        .get(plugin.id.as_str())
         .cloned()
         .unwrap_or_else(|| PluginSettings {
             enabled: plugin.default_enabled,
@@ -123,7 +98,7 @@ impl Services {
         let installed = descriptors()
             .iter()
             .map(|plugin| {
-                let handle = policy.install(plugin.capabilities.iter().map(|cap| cap.kind));
+                let handle = policy.install_manifest(&plugin.manifest);
                 (
                     command_id(plugin),
                     Installed {
@@ -148,11 +123,11 @@ impl Services {
             let settings = settings(config, plugin);
             policy.set_enabled(&entry.handle, settings.enabled);
             entry.enabled.store(settings.enabled, Ordering::Release);
-            for capability in plugin.capabilities {
+            for capability in &plugin.capabilities {
                 policy.set_grant(
                     &entry.handle,
                     capability.kind,
-                    settings.grants.iter().any(|id| id == capability.id),
+                    settings.grants.iter().any(|id| id == &capability.id),
                 );
             }
         }
@@ -167,7 +142,9 @@ impl Services {
                 (
                     command,
                     match plugin.backend {
-                        Backend::NativeSystem => Arc::new(NativeProvider { enabled }) as Arc<dyn Provider>,
+                        Backend::NativeSystem => {
+                            Arc::new(NativeProvider { enabled, plugin }) as Arc<dyn Provider>
+                        }
                         #[cfg(feature = "wasm-runtime")]
                         Backend::Guest { .. } => Arc::new(GuestProvider {
                             plugin,
@@ -186,6 +163,13 @@ impl Services {
         operation: Operation,
     ) -> Result<PreparedOperation, &'static str> {
         let entry = self.installed.get(command).ok_or("This plugin is unavailable.")?;
+        let plugin = descriptors()
+            .iter()
+            .find(|p| command_id(p) == *command)
+            .ok_or("This plugin is unavailable.")?;
+        if !plugin.allows_operation(&operation) {
+            return Err("Undeclared plugin operation.");
+        }
         let is_copy = matches!(operation, Operation::CopyText { .. });
         PreparedOperation::prepare(&self.policy.lock().unwrap(), &entry.handle, operation).map_err(|error| {
             match (is_copy, error) {
@@ -227,10 +211,11 @@ impl Services {
 }
 
 pub fn command_id(plugin: &Descriptor) -> CommandId {
-    CommandId::new(plugin.command).expect("bundled command IDs are valid")
+    CommandId::new(plugin.command.clone()).expect("bundled command IDs are valid")
 }
 
 struct NativeProvider {
+    plugin: &'static Descriptor,
     enabled: Arc<AtomicBool>,
 }
 impl Provider for NativeProvider {
@@ -239,7 +224,7 @@ impl Provider for NativeProvider {
         request: &Request,
         emit: &mut dyn FnMut(Vec<dupin_core::Item>),
     ) -> Result<(), ProviderError> {
-        if !self.enabled.load(Ordering::Acquire) {
+        if !self.enabled.load(Ordering::Acquire) || !self.plugin.eligibility.accepts(&request.query) {
             return Ok(());
         }
         dupin_mac::system_commands::SystemProvider.search(request, emit)
@@ -256,7 +241,11 @@ struct GuestProvider {
 #[cfg(feature = "wasm-runtime")]
 impl Provider for GuestProvider {
     fn search(&self, request: &Request, emit: &mut dyn FnMut(Vec<Item>)) -> Result<(), ProviderError> {
-        if !self.enabled.load(Ordering::Acquire) || request.limit == 0 || request.is_cancelled() {
+        if !self.enabled.load(Ordering::Acquire)
+            || !self.plugin.eligibility.accepts(&request.query)
+            || request.limit == 0
+            || request.is_cancelled()
+        {
             return Ok(());
         }
         let module = self
@@ -268,12 +257,9 @@ impl Provider for GuestProvider {
             version: VERSION,
             request_id: request.generation().to_string(),
             generation: request.generation().to_string(),
-            command: match self.plugin.backend {
-                Backend::Guest { command, .. } => command.into(),
-                _ => return Err(ProviderError),
-            },
+            command: self.plugin.entrypoint.clone(),
             query: request.query.clone(),
-            limit: request.limit.min(dupin_plugin_protocol::MAX_RESULTS as usize) as u32,
+            limit: request.limit.min(self.plugin.result_limit as usize) as u32,
             state: None,
         };
         let response = match module.query_controlled(
@@ -290,6 +276,9 @@ impl Provider for GuestProvider {
         let Outcome::Results { items, .. } = response.outcome else {
             return Err(ProviderError);
         };
+        if !accepts_guest_items(&self.plugin.manifest, &items) {
+            return Err(ProviderError);
+        }
         let command = command_id(self.plugin);
         emit(
             items
@@ -325,6 +314,18 @@ impl Provider for GuestProvider {
     }
 }
 
+#[cfg(any(test, feature = "wasm-runtime"))]
+fn accepts_guest_items(manifest: &ValidatedManifest, items: &[dupin_plugin_protocol::PluginItem]) -> bool {
+    items.len() <= manifest.result_limit as usize
+        && items.iter().all(|item| {
+            manifest.allows_view(&item.view)
+                && item
+                    .actions
+                    .iter()
+                    .all(|action| manifest.allows_operation(&action.operation))
+        })
+}
+
 #[cfg(feature = "wasm-runtime")]
 fn load_module(plugin: &Descriptor) -> Result<GuestModule, HostError> {
     let path = module_path(plugin).ok_or(HostError::InvalidModule)?;
@@ -342,7 +343,7 @@ fn module_path(plugin: &Descriptor) -> Option<PathBuf> {
         return Some(
             PathBuf::from(env!("CARGO_MANIFEST_DIR"))
                 .join("../../plugins")
-                .join(plugin.id)
+                .join(&plugin.id)
                 .join("target/wasm32-unknown-unknown/release")
                 .join(format!("dupin_{}.wasm", plugin.id)),
         );
@@ -415,7 +416,7 @@ mod tests {
                 .is_err()
         );
         config.plugins.insert(
-            plugin.id.into(),
+            plugin.id.clone(),
             PluginSettings {
                 enabled: true,
                 grants: vec!["clipboard-write".into()],
@@ -432,15 +433,15 @@ mod tests {
                 .copy(&command, operation(), || false, |_| panic!("cancelled"))
                 .is_err()
         );
-        config.plugins.get_mut(plugin.id).unwrap().enabled = false;
+        config.plugins.get_mut(plugin.id.as_str()).unwrap().enabled = false;
         services.apply_config(&config);
         assert!(
             services
                 .copy(&command, operation(), || true, |_| panic!("disabled"))
                 .is_err()
         );
-        config.plugins.get_mut(plugin.id).unwrap().enabled = true;
-        config.plugins.get_mut(plugin.id).unwrap().grants.clear();
+        config.plugins.get_mut(plugin.id.as_str()).unwrap().enabled = true;
+        config.plugins.get_mut(plugin.id.as_str()).unwrap().grants.clear();
         services.apply_config(&config);
         assert!(
             services
@@ -519,5 +520,72 @@ mod native_tests {
                 .dispatch(&services.policy.lock().unwrap(), || true, |_| panic!("stale"))
                 .is_err()
         );
+    }
+}
+
+#[cfg(test)]
+mod manifest_tests {
+    use super::*;
+    #[test]
+    fn registration_defaults_and_limits_match_both_builds() {
+        let plugins = descriptors();
+        assert_eq!(plugins.len(), if cfg!(feature = "wasm-runtime") { 2 } else { 1 });
+        let system = plugins.iter().find(|p| p.id == "system").unwrap();
+        assert!(!settings(&Config::default(), system).enabled);
+        assert_eq!(system.result_limit, 2);
+        assert!(settings(&Config::default(), system).grants.is_empty());
+        #[cfg(feature = "wasm-runtime")]
+        {
+            let calc = plugins.iter().find(|p| p.id == "calculator").unwrap();
+            assert!(settings(&Config::default(), calc).enabled);
+            assert_eq!(calc.result_limit, 1);
+            assert!(settings(&Config::default(), calc).grants.is_empty());
+        }
+    }
+    #[test]
+    fn guest_results_are_checked_before_actions_are_exposed() {
+        use dupin_plugin_protocol::{PluginAction, PluginItem, SystemCommand, View};
+        let manifest = Manifest::decode(include_bytes!("calculator-manifest.json")).unwrap();
+        let mut item = PluginItem {
+            id: "answer".into(),
+            view: View::Pair {
+                source: "1+1".into(),
+                result: "2".into(),
+            },
+            primary: None,
+            actions: vec![],
+        };
+        assert!(accepts_guest_items(&manifest, &[item.clone()]));
+        item.view = View::Text {
+            title: "unexpected".into(),
+            subtitle: String::new(),
+        };
+        assert!(!accepts_guest_items(&manifest, &[item.clone()]));
+        item.view = View::Pair {
+            source: "1+1".into(),
+            result: "2".into(),
+        };
+        item.actions.push(PluginAction {
+            id: "run".into(),
+            title: "Sleep".into(),
+            operation: Operation::SystemCommand {
+                command: SystemCommand::Sleep,
+            },
+        });
+        assert!(!accepts_guest_items(&manifest, &[item]));
+    }
+    #[test]
+    fn host_rejects_operations_outside_manifest_even_before_grants() {
+        let services = Services::new(&Config::default());
+        let system = descriptors().iter().find(|p| p.id == "system").unwrap();
+        assert!(matches!(
+            services.prepare(
+                &command_id(system),
+                Operation::CopyText {
+                    text: "result".into()
+                }
+            ),
+            Err("Undeclared plugin operation.")
+        ));
     }
 }

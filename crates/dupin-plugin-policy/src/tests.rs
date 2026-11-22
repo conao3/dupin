@@ -167,3 +167,37 @@ fn uninstall_and_foreign_policies_cannot_reuse_handles_or_permits() {
         Access::MissingPlugin
     ));
 }
+
+#[test]
+fn validated_manifest_update_does_not_grant_new_privileges() {
+    use dupin_plugin_protocol::manifest::{CapabilityDescriptor, Manifest};
+    let initial = Manifest::decode(include_bytes!("../../dupin/src/system-manifest.json")).unwrap();
+    let mut manifest: Manifest = serde_json::from_slice(&initial.encode()).unwrap();
+    manifest
+        .capabilities
+        .retain(|c| c.kind == Capability::SystemSleep);
+    manifest
+        .actions
+        .retain(|a| a.capability() == Capability::SystemSleep);
+    let initial = manifest.clone().validate().unwrap();
+    let mut policy = Policy::default();
+    let handle = policy.install_manifest(&initial);
+    policy.set_enabled(&handle, true);
+    policy.set_grant(&handle, Capability::SystemSleep, true);
+    manifest.capabilities.push(CapabilityDescriptor {
+        id: "system-lock-screen".into(),
+        title: "Lock".into(),
+        description: "Lock the screen".into(),
+        kind: Capability::SystemLockScreen,
+    });
+    let updated = manifest.validate().unwrap();
+    assert!(policy.update_manifest(&handle, &updated));
+    assert!(matches!(
+        policy.access(&handle, Capability::SystemSleep),
+        Access::Allowed(_)
+    ));
+    assert!(matches!(
+        policy.access(&handle, Capability::SystemLockScreen),
+        Access::NeedsGrant
+    ));
+}

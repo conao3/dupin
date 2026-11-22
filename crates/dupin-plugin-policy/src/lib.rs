@@ -1,13 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Capability {
-    ClipboardWrite,
-    SystemSleep,
-    SystemLockScreen,
-    CalendarRead,
-}
+pub use dupin_plugin_protocol::manifest::Capability;
 
 #[cfg(test)]
 mod tests;
@@ -78,6 +72,13 @@ impl Default for Policy {
 }
 
 impl Policy {
+    pub fn install_manifest(
+        &mut self,
+        manifest: &dupin_plugin_protocol::manifest::ValidatedManifest,
+    ) -> PluginHandle {
+        self.install(manifest.capabilities.iter().map(|cap| cap.kind))
+    }
+
     fn revision(&mut self) -> u64 {
         self.sequence = self.sequence.checked_add(1).expect("policy revision exhausted");
         self.sequence
@@ -112,6 +113,14 @@ impl Policy {
             authority: self.authority.clone(),
             instance,
         }
+    }
+
+    pub fn update_manifest(
+        &mut self,
+        handle: &PluginHandle,
+        manifest: &dupin_plugin_protocol::manifest::ValidatedManifest,
+    ) -> bool {
+        self.update(handle, manifest.capabilities.iter().map(|cap| cap.kind))
     }
 
     pub fn uninstall(&mut self, handle: &PluginHandle) -> bool {

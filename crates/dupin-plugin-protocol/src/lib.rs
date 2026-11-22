@@ -708,3 +708,5 @@ mod tests {
         );
     }
 }
+
+pub mod manifest;

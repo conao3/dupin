@@ -1,5 +1,5 @@
 use dupin_plugin_policy::{Access, Capability, Permit, PluginHandle, Policy};
-use dupin_plugin_protocol::{MAX_COPY_BYTES, Operation, SystemCommand};
+use dupin_plugin_protocol::{MAX_COPY_BYTES, Operation};
 
 #[derive(Debug)]
 pub enum PrepareError {
@@ -26,20 +26,12 @@ impl PreparedOperation {
         plugin: &PluginHandle,
         operation: Operation,
     ) -> Result<Self, PrepareError> {
-        let capability = match &operation {
-            Operation::CopyText { text } => {
-                if text.is_empty() || text.len() > MAX_COPY_BYTES {
-                    return Err(PrepareError::InvalidOperation);
-                }
-                Capability::ClipboardWrite
+        if let Operation::CopyText { text } = &operation {
+            if text.is_empty() || text.len() > MAX_COPY_BYTES {
+                return Err(PrepareError::InvalidOperation);
             }
-            Operation::SystemCommand {
-                command: SystemCommand::Sleep,
-            } => Capability::SystemSleep,
-            Operation::SystemCommand {
-                command: SystemCommand::LockScreen,
-            } => Capability::SystemLockScreen,
-        };
+        }
+        let capability = dupin_plugin_protocol::manifest::ActionKind::of(&operation).capability();
         match policy.access(plugin, capability) {
             Access::Allowed(permit) => Ok(Self {
                 permit,
@@ -70,6 +62,7 @@ impl PreparedOperation {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use dupin_plugin_protocol::SystemCommand;
 
     fn operation() -> Operation {
         Operation::CopyText {

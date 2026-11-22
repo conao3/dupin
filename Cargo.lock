@@ -801,6 +801,10 @@ dependencies = [
 [[package]]
 name = "dupin-plugin-policy"
 version = "0.0.0"
+dependencies = [
+ "dupin-plugin-protocol",
+ "serde_json",
+]
 
 [[package]]
 name = "dupin-plugin-protocol"

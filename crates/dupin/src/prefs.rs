@@ -692,47 +692,47 @@ fn plugins(s: &Prefs, k: &Kit) -> Vec<El> {
     for plugin in crate::plugins::descriptors() {
         let current = crate::plugins::settings(&s.config, plugin);
         let enabled = Switch::new(current.enabled)
-            .label(plugin.title)
+            .label(&plugin.title)
             .hide_label()
             .disabled(s.read_only)
             .on_toggle(move |s: &mut Prefs| {
                 s.set(|config| {
                     let mut settings = crate::plugins::settings(config, plugin);
                     settings.enabled = !settings.enabled;
-                    config.plugins.insert(plugin.id.into(), settings);
+                    config.plugins.insert(plugin.id.clone(), settings);
                 })
             })
             .build(k);
         rows.push(setting(
             k,
             &icons::SPARKLES,
-            plugin.title,
-            Some(plugin.description),
+            &plugin.title,
+            Some(&plugin.description),
             enabled,
         ));
-        for capability in plugin.capabilities {
-            let granted = current.grants.iter().any(|id| id == capability.id);
+        for capability in &plugin.capabilities {
+            let granted = current.grants.iter().any(|id| id == &capability.id);
             let grant = Switch::new(granted)
-                .label(capability.title)
+                .label(&capability.title)
                 .hide_label()
                 .disabled(s.read_only || !current.enabled)
                 .on_toggle(move |s: &mut Prefs| {
                     s.set(|config| {
                         let mut settings = crate::plugins::settings(config, plugin);
-                        if settings.grants.iter().any(|id| id == capability.id) {
-                            settings.grants.retain(|id| id != capability.id);
+                        if settings.grants.iter().any(|id| id == &capability.id) {
+                            settings.grants.retain(|id| id != &capability.id);
                         } else {
-                            settings.grants.push(capability.id.into());
+                            settings.grants.push(capability.id.clone());
                         }
-                        config.plugins.insert(plugin.id.into(), settings);
+                        config.plugins.insert(plugin.id.clone(), settings);
                     })
                 })
                 .build(k);
             rows.push(setting(
                 k,
                 &icons::SPARKLES,
-                capability.title,
-                Some(capability.description),
+                &capability.title,
+                Some(&capability.description),
                 grant,
             ));
         }

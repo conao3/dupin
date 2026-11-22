@@ -1,0 +1,22 @@
+{
+	"id": "calculator",
+	"title": "Calculator",
+	"description": "Arithmetic and unit conversions alongside app search",
+	"command": "calculator.evaluate",
+	"schema_version": 1,
+	"plugin_version": "1",
+	"entrypoint": "calculator",
+	"eligibility": "nonempty",
+	"result_limit": 1,
+	"default_enabled": true,
+	"capabilities": [
+		{
+			"id": "clipboard-write",
+			"title": "Copy results",
+			"description": "Allow this plugin to write a result to the clipboard when you choose Copy",
+			"kind": "clipboard-write"
+		}
+	],
+	"views": ["pair"],
+	"actions": ["copy_text"]
+}

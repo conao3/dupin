@@ -164,8 +164,8 @@ pub fn configured(config: &Config) -> Result<ConfiguredCommands, dupin_core::Com
         let command = crate::plugins::command_id(plugin);
         let mut spec = CommandSpec::new(
             command.clone(),
-            1,
-            presentation(plugin.title, Some(plugin.title), None, None, false, 0.0),
+            plugin.result_limit as usize,
+            presentation(&plugin.title, Some(&plugin.title), None, None, false, 0.0),
         );
         spec.deadline = crate::plugins::DEADLINE;
         registry.register(spec)?;

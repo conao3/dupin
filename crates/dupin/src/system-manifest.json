@@ -1,0 +1,28 @@
+{
+	"id": "system",
+	"title": "System Commands",
+	"description": "Trusted in-process native reference plugin for sleep and screen locking",
+	"command": "system.commands",
+	"schema_version": 1,
+	"plugin_version": "1",
+	"entrypoint": "system",
+	"eligibility": "nonempty",
+	"result_limit": 2,
+	"default_enabled": false,
+	"capabilities": [
+		{
+			"id": "system-sleep",
+			"title": "Sleep",
+			"description": "Allow Sleep Now when explicitly selected",
+			"kind": "system-sleep"
+		},
+		{
+			"id": "system-lock-screen",
+			"title": "Lock screen",
+			"description": "Allow Lock Screen Now when explicitly selected",
+			"kind": "system-lock-screen"
+		}
+	],
+	"views": ["text"],
+	"actions": ["sleep", "lock_screen"]
+}
