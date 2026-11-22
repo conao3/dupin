@@ -242,14 +242,14 @@ impl Policy {
         }
         let mut denied = (None, Access::Undeclared);
         for cap in plugin.grants.keys() {
-            if let Capability::OpenUrl(scope) = cap {
-                if scope.allows(url) {
-                    let access = self.access(handle, cap.clone());
-                    if matches!(access, Access::Allowed(_)) {
-                        return (Some(cap.clone()), access);
-                    }
-                    denied = (Some(cap.clone()), access);
+            if let Capability::OpenUrl(scope) = cap
+                && scope.allows(url)
+            {
+                let access = self.access(handle, cap.clone());
+                if matches!(access, Access::Allowed(_)) {
+                    return (Some(cap.clone()), access);
                 }
+                denied = (Some(cap.clone()), access);
             }
         }
         denied

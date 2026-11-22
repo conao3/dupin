@@ -560,7 +560,7 @@ mod manifest_tests {
             title: "unexpected".into(),
             subtitle: String::new(),
         };
-        assert!(!accepts_guest_items(&manifest, &[item.clone()]));
+        assert!(!accepts_guest_items(&manifest, std::slice::from_ref(&item)));
         item.view = View::Pair {
             source: "1+1".into(),
             result: "2".into(),
@@ -572,7 +572,7 @@ mod manifest_tests {
                 command: SystemCommand::Sleep,
             },
         });
-        assert!(!accepts_guest_items(&manifest, &[item.clone()]));
+        assert!(!accepts_guest_items(&manifest, std::slice::from_ref(&item)));
         item.actions[0].operation = Operation::OpenUrl {
             url: "dict://term".into(),
         };
@@ -585,7 +585,7 @@ mod manifest_tests {
             "kind": {"open-url": {"scheme": "dict", "host": null}}
         }]);
         let scoped = Manifest::decode(&serde_json::to_vec(&declaration).unwrap()).unwrap();
-        assert!(accepts_guest_items(&scoped, &[item.clone()]));
+        assert!(accepts_guest_items(&scoped, std::slice::from_ref(&item)));
         item.actions[0].operation = Operation::OpenUrl {
             url: "maps://term".into(),
         };
