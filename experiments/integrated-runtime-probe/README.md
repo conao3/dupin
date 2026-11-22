@@ -33,3 +33,9 @@ not application-startup or idle-memory benchmarks.
 
 The [earlier run](results/2026-11-22-aarch64-darwin.json) remains a historical
 record for its pinned source and guest hashes.
+
+The [remapped-guest rerun](results/2026-11-22-remapped-aarch64-darwin.json)
+uses the guest artifacts from the matching
+[package rerun](../wasm-app-size/results/2026-11-22-integrated-remapped-aarch64-darwin.json).
+All response-equality, fuel-exhaustion and cancellation assertions passed.
+The earlier records retain their original artifact hashes.
