@@ -36,6 +36,13 @@ while additions start ungranted. OS consent changes invalidate calendar permits.
 Uninstalling invalidates the handle permanently, including after reinstalling the
 same public plugin ID. Another policy instance cannot accept its handles or permits.
 
+`dupin-plugin-broker` connects typed copy operations to this policy. It checks
+payload bounds and clipboard-write access at preparation, then consumes the
+prepared copy once after rechecking its permit and a host-supplied current-query
+predicate. The injected clipboard sink is called only after these checks. It has
+no platform clipboard implementation yet and is not connected to launcher actions.
+Both the predicate and sink belong to the trusted host, never the guest.
+
 Persistence, upgrade migration, Settings consent UI, prompt coordination, operation
 cancellation, result/action invalidation and actual broker checks remain separate
 integration work. Tests use only synthetic policy state and never request or change
