@@ -114,13 +114,20 @@ fn input_source_title(source: &InputSource) -> String {
     }
 }
 
-/// Open the shaders folder in Finder, making it first if need be, for a user to drop a file in.
+/// Open the shaders folder in Finder, for a user to drop a file in. Settings makes it first
+/// only while it may write beside config.toml, checked now: something else may have taken the
+/// file over since the window opened.
 fn open_shaders_folder() {
     std::thread::spawn(|| {
         let dir = crate::shader::shaders_dir();
-        match std::fs::create_dir_all(&dir) {
-            Ok(()) => _ = dupin_mac::workspace::open(&dir),
-            Err(e) => crate::log::warn(&format!("couldn't create {}: {e}", dir.display())),
+        if !crate::settings::read_only()
+            && let Err(e) = std::fs::create_dir_all(&dir)
+        {
+            crate::log::warn(&format!("couldn't create {}: {e}", dir.display()));
+            return;
+        }
+        if dir.is_dir() {
+            _ = dupin_mac::workspace::open(&dir);
         }
     });
 }
@@ -557,14 +564,19 @@ fn appearance(s: &Prefs, k: &Kit) -> Vec<El> {
         &backdrop_title(&s.config.backdrop),
         Prefs::pick_backdrop,
     );
-    let folder = tilde(&crate::shader::shaders_dir().display().to_string());
+    let dir = crate::shader::shaders_dir();
+    let folder = tilde(&dir.display().to_string());
     let open = value_button(
         k,
         "open-shaders",
         "Open",
         &rune_theme_opencode::icons::CHEVRON_RIGHT,
-    )
-    .on_press(|_: &mut Prefs| open_shaders_folder());
+    );
+    let open = if !s.read_only || dir.is_dir() {
+        open.on_press(|_: &mut Prefs| open_shaders_folder())
+    } else {
+        open.disabled(true).layer_opacity(0.5)
+    };
     vec![
         setting(
             k,
