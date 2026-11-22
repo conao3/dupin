@@ -392,4 +392,30 @@ mod url_tests {
             cap("example.com").id()
         );
     }
+
+    #[test]
+    fn dictionary_terms_preserve_existing_url_encoding_without_widening_hosts() {
+        let mut policy = Policy::default();
+        let capability = Capability::OpenUrl(UrlScope::new("dict", None).unwrap());
+        let plugin = policy.install([capability.clone()]);
+        policy.set_enabled(&plugin, true);
+        policy.set_grant(&plugin, capability, true);
+        for url in [
+            "dict://a%20b%2F%23%C3%A9",
+            "dict://%E8%BE%9E%E6%9B%B8",
+            "dict://Mr.",
+        ] {
+            PreparedOperation::prepare(&policy, &plugin, op(url))
+                .unwrap()
+                .dispatch(&policy, || true, |_| {})
+                .unwrap();
+        }
+        let capability = Capability::OpenUrl(UrlScope::new("dict", Some("term")).unwrap());
+        let restricted = policy.install([capability.clone()]);
+        policy.set_enabled(&restricted, true);
+        policy.set_grant(&restricted, capability, true);
+        for url in ["dict://%74erm", "dict://term.", "dict://term%2Fevil"] {
+            assert!(PreparedOperation::prepare(&policy, &restricted, op(url)).is_err());
+        }
+    }
 }

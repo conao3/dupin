@@ -87,6 +87,7 @@ pub fn validated_url(value: &str) -> Result<Url, &'static str> {
         }
     }
     let url = Url::parse(value).map_err(|_| "invalid URL")?;
+    let network = matches!(url.scheme(), "http" | "https");
     if !matches!(url.scheme(), "dict" | "maps" | "http" | "https")
         || !url.username().is_empty()
         || url.password().is_some()
@@ -94,23 +95,23 @@ pub fn validated_url(value: &str) -> Result<Url, &'static str> {
     {
         return Err("unsafe URL");
     }
-    // Native and WHATWG parsers must agree on the authority passed to Launch Services.
+    // Network grants require an unambiguous host; Dictionary URLs put escaped terms here.
     let rest = value.split_once(':').ok_or("invalid URL")?.1;
     if let Some(authority) = rest.strip_prefix("//") {
         let authority = authority.split(['/', '?', '#']).next().unwrap_or("");
         if !authority.is_ascii()
-            || authority.contains(['%', '@', ':'])
-            || authority.ends_with('.')
+            || authority.contains(['@', ':'])
+            || (network && (authority.contains('%') || authority.ends_with('.')))
             || url
                 .host_str()
                 .is_some_and(|host| !host.eq_ignore_ascii_case(authority))
         {
             return Err("ambiguous URL authority");
         }
-    } else if matches!(url.scheme(), "http" | "https") {
+    } else if network {
         return Err("network URL requires authority");
     }
-    if matches!(url.scheme(), "http" | "https") && url.host_str().is_none() {
+    if network && url.host_str().is_none() {
         return Err("network URL requires hostname");
     }
     Ok(url)
