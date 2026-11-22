@@ -58,6 +58,78 @@ fn typing_searches_apps() {
 }
 
 #[test]
+fn pasted_keywords_use_the_same_modes_and_aliases_as_typed_keywords() {
+    for (keyword, mode) in [
+        ("in", Mode::Contents),
+        ("define", Mode::Dictionary),
+        ("d", Mode::Dictionary),
+        ("word", Mode::Dictionary),
+        ("look up", Mode::Dictionary),
+    ] {
+        let mut s = Session::with_dictionary_keywords(
+            History::default(),
+            vec!["define".into(), "d".into(), "word".into(), "look up".into()],
+        );
+        let effects = s.set_query(&format!("{keyword}  日本語 phrase"));
+        assert_eq!(s.mode(), mode);
+        assert_eq!(s.query(), "日本語 phrase");
+        assert_eq!(effects[0], Effect::ReplaceQuery("日本語 phrase".into()));
+        assert_eq!(searched(&effects[1..]).0, mode);
+        assert_eq!(searched(&effects[1..]).2, "日本語 phrase");
+        s.set_query("");
+        s.intent(Intent::Backspace);
+        assert_eq!(s.mode(), Mode::Apps);
+    }
+}
+
+#[test]
+fn compound_aliases_match_the_complete_keyword_and_separator() {
+    let mut s = Session::with_dictionary_keywords(History::default(), vec!["look up".into()]);
+    s.set_query("look up");
+    s.intent(Intent::Space);
+    assert_eq!(s.mode(), Mode::Dictionary);
+    s.reset();
+    let effects = s.set_query("look up\t  日本語 phrase");
+    assert_eq!(s.mode(), Mode::Dictionary);
+    assert_eq!(s.query(), "日本語 phrase");
+    assert_eq!(searched(&effects[1..]).2, "日本語 phrase");
+    s.reset();
+    assert_eq!(searched(&s.set_query("look upper")).0, Mode::Apps);
+    s.set_query("look up ");
+    assert_eq!(s.mode(), Mode::Dictionary);
+    assert!(s.query().is_empty());
+}
+
+#[test]
+fn unknown_prefixes_and_non_app_modes_keep_literal_queries() {
+    for query in ["unknown word", "define", "dictionary word"] {
+        let mut s = Session::default();
+        assert_eq!(searched(&s.set_query(query)).0, Mode::Apps);
+        assert_eq!(s.query(), query);
+    }
+    let mut s = Session::default();
+    s.intent(Intent::Space);
+    assert_eq!(searched(&s.set_query("d file name")).0, Mode::Files);
+    assert_eq!(s.query(), "d file name");
+}
+
+#[test]
+fn a_pasted_mode_switch_discards_previous_results_and_late_deliveries() {
+    let mut s = Session::default();
+    let generation = searched(&s.set_query("saf")).1;
+    s.deliver(Delivery::Batch {
+        generation,
+        items: vec![item(ItemKind::Application, "Safari")],
+    });
+    s.set_query("d word");
+    assert!(s.items().is_empty());
+    assert!(!s.deliver(Delivery::Batch {
+        generation,
+        items: vec![item(ItemKind::Application, "Safari")]
+    }));
+}
+
+#[test]
 fn refreshing_repeats_the_current_apps_query_with_a_new_generation() {
     let mut s = Session::default();
     let first_effects = s.set_query("saf");
@@ -474,4 +546,22 @@ fn refreshing_keeps_the_selected_item_when_results_reorder() {
         items: vec![ranked("A", 100)],
     });
     assert_eq!(s.selected_item().unwrap().title, "A");
+}
+
+#[test]
+fn pasting_an_empty_keyword_cancels_the_previous_search() {
+    let mut s = Session::default();
+    let generation = searched(&s.set_query("Safari")).1;
+    let effects = s.set_query("d ");
+    assert_eq!(s.mode(), Mode::Dictionary);
+    assert_eq!(s.query(), "");
+    assert_eq!(
+        effects,
+        vec![Effect::ReplaceQuery(String::new()), Effect::CancelSearch]
+    );
+    assert!(!s.deliver(Delivery::Batch {
+        generation,
+        items: vec![ranked("Safari", 100)],
+    }));
+    assert!(s.items().is_empty());
 }
