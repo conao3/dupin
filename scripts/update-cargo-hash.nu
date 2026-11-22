@@ -15,5 +15,6 @@ def main [package: string = "default", --file: path]: nothing -> nothing {
     }
     cd ($env.FILE_PWD | path dirname)
     nix flake archive --json | from json | ignore
-    nix-update --flake --version=skip ...$flags $package
+    let attribute = if $package == "default" { "default.baseline" } else { $package }
+    nix-update --flake --version=skip ...$flags $attribute
 }

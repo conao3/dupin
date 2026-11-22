@@ -68,17 +68,18 @@ authentication, warmup or native E2E succeeded.
 
 ## Nix layout
 
-| File                   | Holds                                                                                                                                                                        |
-| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `flake.nix`            | Inputs and the flake-parts modules below                                                                                                                                     |
-| `package.nix`          | The Dupin package (`callPackage` style), with `Dupin.app` around the binary and its icon drawn from `assets/logo/dupin.svg`                                                  |
-| `default.nix`          | `package.nix` for non-flake use                                                                                                                                              |
-| `nix/packages.nix`     | `packages.dupin`, `packages.dupin-no-wasm`, `packages.calculator-plugin`, `packages.currency-guest`, `packages.minimal-plugin`, `packages.blacksmith` and `packages.default` |
-| `nix/blacksmith.nix`   | The pinned Testbox CLI and its SSH/rsync tools                                                                                                                               |
-| `nix/home-manager.nix` | `homeManagerModules.default`: `programs.dupin`, see [Configuration](./configuration.md#nix)                                                                                  |
-| `nix/checks.nix`       | Clippy and the tests in one debug build                                                                                                                                      |
-| `nix/treefmt.nix`      | The formatters and linters behind `nix fmt` and `checks.treefmt`                                                                                                             |
-| `nix/dev-shell.nix`    | The development shell                                                                                                                                                        |
+| File                      | Holds                                                                                                                                                                        |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `flake.nix`               | Inputs and the flake-parts modules below                                                                                                                                     |
+| `package.nix`             | The Dupin package (`callPackage` style), with `Dupin.app` around the binary and its icon drawn from `assets/logo/dupin.svg`                                                  |
+| `default.nix`             | `package.nix` for non-flake use                                                                                                                                              |
+| `nix/packages.nix`        | `packages.dupin`, `packages.dupin-no-wasm`, `packages.calculator-plugin`, `packages.currency-guest`, `packages.minimal-plugin`, `packages.blacksmith` and `packages.default` |
+| `nix/cargo-artifacts.nix` | Compiled release/debug dependency caches and the flake app and checks                                                                                                        |
+| `nix/blacksmith.nix`      | The pinned Testbox CLI and its SSH/rsync tools                                                                                                                               |
+| `nix/home-manager.nix`    | `homeManagerModules.default`: `programs.dupin`, see [Configuration](./configuration.md#nix)                                                                                  |
+| `nix/checks.nix`          | Clippy and the tests in one debug build                                                                                                                                      |
+| `nix/treefmt.nix`         | The formatters and linters behind `nix fmt` and `checks.treefmt`                                                                                                             |
+| `nix/dev-shell.nix`       | The development shell                                                                                                                                                        |
 
 The version lives in `VERSION` (see [releasing](./releasing.md)). `package.nix` holds the hash of the root workspace's vendored Cargo dependencies; after `Cargo.lock` changes, refresh it with `nu scripts/update-cargo-hash.nu` (nix-update). The standalone Wasm guest workspaces have their own locks and fixed-output hashes. Refresh those from their wrapper files:
 
@@ -90,6 +91,12 @@ nu scripts/update-cargo-hash.nu currency-guest --file nix/currency-guest.nix
 The currency guest is a fixed-rate fixture for runtime tests, not a launcher feature. The vendor derivation's name carries its Cargo lock's hash, so a stale hash fails the next local build instead of only CI. On every pull request, the autofix.ci workflow refreshes the root, calculator and currency-guest hashes with these commands and pushes any changes.
 
 Nix builds the calculator as a separate bare Wasm resource and bundles it into `dupin.app`. `dupin-no-wasm` builds the same launcher with the Wasm runtime disabled; it is useful for checking the runtime's contribution independently of guest code and does not show calculator results. Build either package with `nix build .#dupin` or `nix build .#dupin-no-wasm`.
+
+Flake builds share compiled dependencies separately for release and debug.
+The [Nix cache experiment](../experiments/nix-cargo-cache/README.md) compares
+source-edit builds against the original builder. `dupin.baseline` exposes that
+builder and its vendor-hash definition; the hash update script evaluates it so
+updates still target `package.nix`. The non-flake `default.nix` build uses it too.
 
 ## Formatting
 
