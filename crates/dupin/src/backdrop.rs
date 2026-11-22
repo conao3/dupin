@@ -3,7 +3,6 @@
 //! while the panel shows.
 
 use std::sync::Arc;
-use std::task::{Context, Poll, Waker};
 
 use dupin_core::Mode;
 use dupin_core::session::Results;
@@ -46,8 +45,20 @@ struct Gpu {
 /// than the window's.
 struct Program {
     source: Arc<str>,
+    /// Always set until the program drops.
     module: Option<wgpu::ShaderModule>,
-    pipes: Vec<(wgpu::TextureFormat, Option<wgpu::RenderPipeline>)>,
+    pipes: Vec<(wgpu::TextureFormat, wgpu::RenderPipeline)>,
+}
+
+impl Drop for Program {
+    /// The module holds Rune's parse of the user's shader, which drops recursively: a long
+    /// `else if` chain is deep, so drop it on the deep stack too, with the pipelines, which can
+    /// hold the last reference to it.
+    fn drop(&mut self) {
+        let module = self.module.take();
+        let pipes = std::mem::take(&mut self.pipes);
+        crate::shader::deep(move || drop((pipes, module)));
+    }
 }
 
 impl Gpu {
@@ -101,7 +112,9 @@ impl Gpu {
         {
             return;
         }
-        let module = checked(device, "backdrop shader", || {
+        // Rune parses the module here and translates it when the pipeline is made: on the main
+        // thread, naga's recursion overflows on deep expressions `shader::compile` passes.
+        let module = crate::shader::deep(|| {
             device.create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("backdrop"),
                 source: wgpu::ShaderSource::Wgsl(source.as_ref().into()),
@@ -109,7 +122,7 @@ impl Gpu {
         });
         self.program = Some(Program {
             source: source.clone(),
-            module,
+            module: Some(module),
             pipes: Vec::new(),
         });
     }
@@ -120,10 +133,11 @@ impl Gpu {
             Some(at) => at,
             None => {
                 let module = program.module.as_ref()?;
-                let pipe = checked(device, "backdrop pipeline", || {
+                let layout = &self.layout;
+                let pipe = crate::shader::deep(|| {
                     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                         label: Some("backdrop"),
-                        layout: Some(&self.layout),
+                        layout: Some(layout),
                         vertex: wgpu::VertexState {
                             module,
                             entry_point: Some("dupin_vs"),
@@ -154,7 +168,7 @@ impl Gpu {
                 program.pipes.len() - 1
             }
         };
-        program.pipes[at].1.as_ref()
+        Some(&program.pipes[at].1)
     }
 
     fn draw(
@@ -194,22 +208,6 @@ impl Gpu {
         pass.set_bind_group(0, &self.group, &[]);
         pass.draw(0..4, 0..1);
         true
-    }
-}
-
-/// Runs `make` in a validation error scope, so a module the shader compiler rejects past
-/// `shader::compile`'s checks is logged and skipped instead of panicking in wgpu's default
-/// error handler.
-fn checked<T>(device: &wgpu::Device, what: &str, make: impl FnOnce() -> T) -> Option<T> {
-    let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
-    let made = make();
-    let mut popped = std::pin::pin!(scope.pop());
-    match popped.as_mut().poll(&mut Context::from_waker(Waker::noop())) {
-        Poll::Ready(Some(e)) => {
-            crate::log::warn(&format!("{what}: {e}"));
-            None
-        }
-        _ => Some(made),
     }
 }
 
