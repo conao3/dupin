@@ -8,7 +8,6 @@ pub const APPS: &str = "apps.search";
 pub const FILES: &str = "files.names";
 pub const CONTENTS: &str = "files.contents";
 pub const DICTIONARY: &str = "dictionary.lookup";
-const SYSTEM: &str = "system.commands";
 const SETTINGS: &str = "settings.search";
 const WEB_KEYWORDS: &str = "web.keywords";
 const WEB_FALLBACKS: &str = "web.fallbacks";
@@ -146,11 +145,6 @@ pub fn configured(config: &Config) -> Result<ConfiguredCommands, dupin_core::Com
         )
         .with_fallback(),
     )?;
-    registry.register(CommandSpec::new(
-        id(SYSTEM),
-        2,
-        presentation("System commands", None, None, None, false, 0.0),
-    ))?;
     registry.add_keyword(&contents_id, "in")?;
     let mut rejected = Vec::new();
     for keyword in &config.dictionary_keywords {
@@ -179,13 +173,7 @@ pub fn configured(config: &Config) -> Result<ConfiguredCommands, dupin_core::Com
             defaults.push(command);
         }
     }
-    defaults.extend([
-        id(APPS),
-        id(SETTINGS),
-        id(SYSTEM),
-        id(WEB_KEYWORDS),
-        id(WEB_FALLBACKS),
-    ]);
+    defaults.extend([id(APPS), id(SETTINGS), id(WEB_KEYWORDS), id(WEB_FALLBACKS)]);
     registry.set_default_providers(defaults, Some(id(WEB_KEYWORDS)))?;
     let (web, web_notice) =
         crate::web::WebCatalog::compile(config, |keyword| registry.keyword(keyword).is_some());
@@ -216,10 +204,6 @@ pub fn register(
     let file_demotions = Arc::new(RwLock::new(config.file_demotions.clone()));
     let mut providers: HashMap<_, Arc<dyn Provider>> = [
         (apps_id, apps as Arc<dyn Provider>),
-        (
-            id(SYSTEM),
-            Arc::new(dupin_mac::system_commands::SystemProvider) as Arc<dyn Provider>,
-        ),
         (
             id(SETTINGS),
             Arc::new(dupin_mac::SettingsProvider::default()) as Arc<dyn Provider>,
@@ -330,7 +314,15 @@ mod tests {
     #[test]
     fn system_results_require_current_explicit_activation() {
         use dupin_core::{Action, Delivery, Effect, History, Intent, Request, Session};
-        let configured = configured(&Config::default()).unwrap();
+        let mut config = Config::default();
+        config.plugins.insert(
+            "system".into(),
+            dupin_core::config::PluginSettings {
+                enabled: true,
+                grants: vec![],
+            },
+        );
+        let configured = configured(&config).unwrap();
         let mut session = Session::new(History::default(), configured.registry).unwrap();
         for query in ["sleep", "lock"] {
             let effects = session.set_query(query);
@@ -354,7 +346,7 @@ mod tests {
                 .search(&Request::detached(query, 2), &mut |batch| rows.extend(batch))
                 .unwrap();
             session.deliver_from(
-                id(SYSTEM),
+                id("system.commands"),
                 Delivery::Batch {
                     generation,
                     items: rows.clone(),
@@ -382,12 +374,12 @@ mod tests {
             assert!(
                 activation
                     .iter()
-                    .any(|e| matches!(e, Effect::Run(Action::Host(_))))
+                    .any(|e| matches!(e, Effect::Run(Action::Plugin { .. })))
             );
             let effects = session.set_query("unrelated");
             assert!(!effects.iter().any(|e| matches!(e, Effect::Run(_))));
             session.deliver_from(
-                id(SYSTEM),
+                id("system.commands"),
                 Delivery::Batch {
                     generation,
                     items: rows,

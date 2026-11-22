@@ -55,4 +55,4 @@
     i32.const 114)
 
   (data (i32.const 400000)
-    "{\22version\22:2,\22request_id\22:\22minimal-probe-1\22,\22generation\22:\221\22,\22outcome\22:{\22kind\22:\22results\22,\22items\22:[],\22state\22:null}}"))
+    "{\22version\22:3,\22request_id\22:\22minimal-probe-1\22,\22generation\22:\221\22,\22outcome\22:{\22kind\22:\22results\22,\22items\22:[],\22state\22:null}}"))

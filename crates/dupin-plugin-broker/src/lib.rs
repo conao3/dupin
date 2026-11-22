@@ -1,5 +1,5 @@
 use dupin_plugin_policy::{Access, Capability, Permit, PluginHandle, Policy};
-use dupin_plugin_protocol::{MAX_COPY_BYTES, Operation};
+use dupin_plugin_protocol::{MAX_COPY_BYTES, Operation, SystemCommand};
 
 #[derive(Debug)]
 pub enum PrepareError {
@@ -14,23 +14,38 @@ pub enum DispatchError {
 }
 
 #[must_use]
-pub struct PreparedCopy {
+pub struct PreparedOperation {
     permit: Permit,
-    text: String,
+    operation: Operation,
+    capability: Capability,
 }
 
-impl PreparedCopy {
+impl PreparedOperation {
     pub fn prepare(
         policy: &Policy,
         plugin: &PluginHandle,
         operation: Operation,
     ) -> Result<Self, PrepareError> {
-        let Operation::CopyText { text } = operation;
-        if text.is_empty() || text.len() > MAX_COPY_BYTES {
-            return Err(PrepareError::InvalidOperation);
-        }
-        match policy.access(plugin, Capability::ClipboardWrite) {
-            Access::Allowed(permit) => Ok(Self { permit, text }),
+        let capability = match &operation {
+            Operation::CopyText { text } => {
+                if text.is_empty() || text.len() > MAX_COPY_BYTES {
+                    return Err(PrepareError::InvalidOperation);
+                }
+                Capability::ClipboardWrite
+            }
+            Operation::SystemCommand {
+                command: SystemCommand::Sleep,
+            } => Capability::SystemSleep,
+            Operation::SystemCommand {
+                command: SystemCommand::LockScreen,
+            } => Capability::SystemLockScreen,
+        };
+        match policy.access(plugin, capability) {
+            Access::Allowed(permit) => Ok(Self {
+                permit,
+                operation,
+                capability,
+            }),
             access => Err(PrepareError::Access(access)),
         }
     }
@@ -39,15 +54,15 @@ impl PreparedCopy {
         self,
         policy: &Policy,
         is_current: impl FnOnce() -> bool,
-        copy: impl FnOnce(&str),
+        sink: impl FnOnce(Operation),
     ) -> Result<(), DispatchError> {
         if !is_current() {
             return Err(DispatchError::Cancelled);
         }
-        if !policy.validate(&self.permit, Capability::ClipboardWrite) {
+        if !policy.validate(&self.permit, self.capability) {
             return Err(DispatchError::AccessChanged);
         }
-        copy(&self.text);
+        sink(self.operation);
         Ok(())
     }
 }
@@ -75,18 +90,111 @@ mod tests {
     }
 
     #[test]
+    fn system_operations_require_their_own_declaration_enablement_and_grant() {
+        for (command, capability, other) in [
+            (
+                SystemCommand::Sleep,
+                Capability::SystemSleep,
+                Capability::SystemLockScreen,
+            ),
+            (
+                SystemCommand::LockScreen,
+                Capability::SystemLockScreen,
+                Capability::SystemSleep,
+            ),
+        ] {
+            let operation = || Operation::SystemCommand { command };
+            let mut policy = Policy::default();
+            let plugin = policy.install([capability]);
+            assert!(matches!(
+                PreparedOperation::prepare(&policy, &plugin, operation()),
+                Err(PrepareError::Access(Access::Disabled))
+            ));
+            policy.set_enabled(&plugin, true);
+            assert!(matches!(
+                PreparedOperation::prepare(&policy, &plugin, operation()),
+                Err(PrepareError::Access(Access::NeedsGrant))
+            ));
+            policy.set_grant(&plugin, capability, true);
+            assert!(matches!(
+                PreparedOperation::prepare(
+                    &policy,
+                    &plugin,
+                    Operation::SystemCommand {
+                        command: if command == SystemCommand::Sleep {
+                            SystemCommand::LockScreen
+                        } else {
+                            SystemCommand::Sleep
+                        }
+                    }
+                ),
+                Err(PrepareError::Access(Access::Undeclared))
+            ));
+            let foreign = policy.install([capability, other]);
+            policy.set_enabled(&foreign, true);
+            assert!(PreparedOperation::prepare(&policy, &foreign, operation()).is_err());
+            for disable in [false, true] {
+                let prepared = PreparedOperation::prepare(&policy, &plugin, operation()).unwrap();
+                if disable {
+                    policy.set_enabled(&plugin, false);
+                    policy.set_enabled(&plugin, true);
+                } else {
+                    policy.set_grant(&plugin, capability, false);
+                    policy.set_grant(&plugin, capability, true);
+                }
+                assert_eq!(
+                    prepared.dispatch(&policy, || true, |_| panic!("stale permit")),
+                    Err(DispatchError::AccessChanged)
+                );
+            }
+            let prepared = PreparedOperation::prepare(&policy, &plugin, operation()).unwrap();
+            assert_eq!(
+                prepared.dispatch(&policy, || false, |_| panic!("cancelled")),
+                Err(DispatchError::Cancelled)
+            );
+            let prepared = PreparedOperation::prepare(&policy, &plugin, operation()).unwrap();
+            assert_eq!(
+                prepared.dispatch(&Policy::default(), || true, |_| panic!("replaced policy")),
+                Err(DispatchError::AccessChanged)
+            );
+            let mut calls = 0;
+            PreparedOperation::prepare(&policy, &plugin, operation())
+                .unwrap()
+                .dispatch(
+                    &policy,
+                    || true,
+                    |received| {
+                        assert_eq!(received, operation());
+                        calls += 1;
+                    },
+                )
+                .unwrap();
+            assert_eq!(calls, 1);
+        }
+    }
+
+    #[test]
     fn invocation_requires_its_own_plugin_grant() {
         let mut policy = Policy::default();
         let first = granted(&mut policy);
         let second = enabled(&mut policy);
         assert!(matches!(
-            PreparedCopy::prepare(&policy, &second, operation()),
+            PreparedOperation::prepare(&policy, &second, operation()),
             Err(PrepareError::Access(Access::NeedsGrant))
         ));
-        let copy = PreparedCopy::prepare(&policy, &first, operation()).unwrap();
+        let copy = PreparedOperation::prepare(&policy, &first, operation()).unwrap();
         let mut clipboard = String::new();
-        copy.dispatch(&policy, || true, |text| clipboard = text.to_owned())
-            .unwrap();
+        copy.dispatch(
+            &policy,
+            || true,
+            |operation| {
+                let Operation::CopyText { text } = operation else {
+                    panic!()
+                };
+                clipboard = text;
+            },
+        )
+        .unwrap();
         assert_eq!(clipboard, "approx. 37.7777777778 °C");
     }
 
@@ -95,7 +203,7 @@ mod tests {
         for disable in [false, true] {
             let mut policy = Policy::default();
             let plugin = granted(&mut policy);
-            let copy = PreparedCopy::prepare(&policy, &plugin, operation()).unwrap();
+            let copy = PreparedOperation::prepare(&policy, &plugin, operation()).unwrap();
             if disable {
                 policy.set_enabled(&plugin, false);
                 policy.set_enabled(&plugin, true);
@@ -114,12 +222,12 @@ mod tests {
     fn query_cancellation_and_policy_replacement_reject_pending_copies() {
         let mut policy = Policy::default();
         let plugin = granted(&mut policy);
-        let copy = PreparedCopy::prepare(&policy, &plugin, operation()).unwrap();
+        let copy = PreparedOperation::prepare(&policy, &plugin, operation()).unwrap();
         assert_eq!(
             copy.dispatch(&policy, || false, |_| panic!("cancelled copy")),
             Err(DispatchError::Cancelled)
         );
-        let copy = PreparedCopy::prepare(&policy, &plugin, operation()).unwrap();
+        let copy = PreparedOperation::prepare(&policy, &plugin, operation()).unwrap();
         assert_eq!(
             copy.dispatch(&Policy::default(), || true, |_| panic!("foreign copy")),
             Err(DispatchError::AccessChanged)
@@ -132,12 +240,12 @@ mod tests {
         let plugin = granted(&mut policy);
         for text in [String::new(), "x".repeat(MAX_COPY_BYTES + 1)] {
             assert!(matches!(
-                PreparedCopy::prepare(&policy, &plugin, Operation::CopyText { text }),
+                PreparedOperation::prepare(&policy, &plugin, Operation::CopyText { text }),
                 Err(PrepareError::InvalidOperation)
             ));
         }
         assert!(
-            PreparedCopy::prepare(
+            PreparedOperation::prepare(
                 &policy,
                 &plugin,
                 Operation::CopyText {

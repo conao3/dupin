@@ -14,7 +14,7 @@ objects across an ABI.
 
 ## Messages
 
-Messages are UTF-8 JSON with `version: 2`. Unknown versions, fields, view kinds
+Messages are UTF-8 JSON with `version: 3`. Unknown versions, fields, view kinds
 and error codes are rejected. Request IDs and generations are opaque strings,
 so authors do not need JSON numbers to represent a host's full-width counters.
 
@@ -31,17 +31,19 @@ A text subtitle may be empty. Items also declare a nullable `primary` action ID
 for Enter. A non-null ID must resolve to one of that item's actions; null leaves
 selection of an action to the host menu.
 
-Actions contain an ID, title and a typed `operation`. The only current operation
-is `copy_text`, with a non-empty bounded `text` value. No executable code, native
+Actions contain an ID, title and a typed `operation`. Operations are `copy_text`, with a non-empty bounded `text` value, and
+`system_command`, with a closed `command` enum (`sleep` or `lock_screen`).
+Unknown operations and command values are rejected. Version 3 deliberately
+replaces version 2; guests must be rebuilt. No executable code, native
 UI objects or arbitrary OS operations are accepted. The host must check the
-plugin's declared and granted clipboard-write capability at invocation time;
+plugin's declared and granted capability for that operation at invocation time;
 displaying the action or pressing Enter does not create a grant. Protocol
 validation alone never executes an operation. The calculator declares a primary
 copy action. In the launcher, the broker rechecks its grant and current result
 before the host clipboard sink runs. The fixture CLI prints the action data and
 does not dispatch it.
 
-Version 2 replaces version 1's label-only action descriptors; old wire messages
+Version 3 replaces version 1's label-only action descriptors; old wire messages
 are rejected explicitly. The private memory ABI remains version 1.
 
 The host checks request/response correlation and result count after decoding.

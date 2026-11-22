@@ -73,7 +73,8 @@ Rust ABI or arbitrary dynamic-library loading.
 
 The target architecture gives each transitional bundled plugin a broker handle
 rather than direct OS services. This is a trusted-code boundary, not a sandbox
-against malicious native code. The calculator's copy action uses the broker;
+against malicious native code. The calculator's copy action and the trusted in-process native System Commands
+reference plugin use the broker;
 app, file and dictionary providers still access macOS directly. Migration ends
 only when the shell has no feature-specific modes, result kinds or payload fields
 and feature code has no direct OS access outside the broker. An upgrade migration

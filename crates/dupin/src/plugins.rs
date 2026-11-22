@@ -3,17 +3,18 @@ use std::collections::HashMap;
 use std::io::Read;
 #[cfg(feature = "wasm-runtime")]
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 #[cfg(feature = "wasm-runtime")]
 use std::{sync::OnceLock, time::Instant};
 
 use dupin_core::config::PluginSettings;
 #[cfg(feature = "wasm-runtime")]
-use dupin_core::{Action, Item, ItemAction, ProviderError, Request};
+use dupin_core::{Action, Item, ItemAction};
 use dupin_core::{CommandId, Config, Provider};
-use dupin_plugin_broker::{PrepareError, PreparedCopy};
+use dupin_core::{ProviderError, Request};
+use dupin_plugin_broker::{PrepareError, PreparedOperation};
 use dupin_plugin_policy::{Access, Capability, PluginHandle, Policy};
 use dupin_plugin_protocol::Operation;
 #[cfg(feature = "wasm-runtime")]
@@ -35,37 +36,64 @@ pub struct Descriptor {
     pub command: &'static str,
     pub default_enabled: bool,
     pub capabilities: &'static [CapabilityDescriptor],
+    backend: Backend,
+}
+
+enum Backend {
+    NativeSystem,
     #[cfg(feature = "wasm-runtime")]
-    guest_command: &'static str,
-    #[cfg(feature = "wasm-runtime")]
-    module: &'static str,
+    Guest {
+        command: &'static str,
+        module: &'static str,
+    },
 }
 
 pub const DEADLINE: Duration = Duration::from_secs(2);
 
-#[cfg(feature = "wasm-runtime")]
 pub fn descriptors() -> &'static [Descriptor] {
-    static PLUGINS: &[Descriptor] = &[Descriptor {
-        id: "calculator",
-        title: "Calculator",
-        description: "Arithmetic and unit conversions alongside app search",
-        command: "calculator.evaluate",
-        default_enabled: true,
-        guest_command: "calculator",
-        module: "calculator.wasm",
-        capabilities: &[CapabilityDescriptor {
-            id: "clipboard-write",
-            title: "Copy results",
-            description: "Allow this plugin to write a result to the clipboard when you choose Copy",
-            kind: Capability::ClipboardWrite,
-        }],
-    }];
+    static PLUGINS: &[Descriptor] = &[
+        #[cfg(feature = "wasm-runtime")]
+        Descriptor {
+            id: "calculator",
+            title: "Calculator",
+            description: "Arithmetic and unit conversions alongside app search",
+            command: "calculator.evaluate",
+            default_enabled: true,
+            backend: Backend::Guest {
+                command: "calculator",
+                module: "calculator.wasm",
+            },
+            capabilities: &[CapabilityDescriptor {
+                id: "clipboard-write",
+                title: "Copy results",
+                description: "Allow this plugin to write a result to the clipboard when you choose Copy",
+                kind: Capability::ClipboardWrite,
+            }],
+        },
+        Descriptor {
+            id: "system",
+            title: "System Commands",
+            description: "Trusted in-process native reference plugin for sleep and screen locking",
+            command: "system.commands",
+            default_enabled: false,
+            backend: Backend::NativeSystem,
+            capabilities: &[
+                CapabilityDescriptor {
+                    id: "system-sleep",
+                    title: "Sleep",
+                    description: "Allow Sleep Now when explicitly selected",
+                    kind: Capability::SystemSleep,
+                },
+                CapabilityDescriptor {
+                    id: "system-lock-screen",
+                    title: "Lock screen",
+                    description: "Allow Lock Screen Now when explicitly selected",
+                    kind: Capability::SystemLockScreen,
+                },
+            ],
+        },
+    ];
     PLUGINS
-}
-
-#[cfg(not(feature = "wasm-runtime"))]
-pub fn descriptors() -> &'static [Descriptor] {
-    &[]
 }
 
 pub fn settings(config: &Config, plugin: &Descriptor) -> PluginSettings {
@@ -85,7 +113,7 @@ struct Installed {
 }
 
 pub struct Services {
-    policy: Policy,
+    policy: Arc<Mutex<Policy>>,
     installed: HashMap<CommandId, Installed>,
 }
 
@@ -105,19 +133,23 @@ impl Services {
                 )
             })
             .collect();
-        let mut services = Self { policy, installed };
+        let mut services = Self {
+            policy: Arc::new(Mutex::new(policy)),
+            installed,
+        };
         services.apply_config(config);
         services
     }
 
     pub fn apply_config(&mut self, config: &Config) {
+        let mut policy = self.policy.lock().unwrap();
         for plugin in descriptors() {
             let entry = &self.installed[&command_id(plugin)];
             let settings = settings(config, plugin);
-            self.policy.set_enabled(&entry.handle, settings.enabled);
+            policy.set_enabled(&entry.handle, settings.enabled);
             entry.enabled.store(settings.enabled, Ordering::Release);
             for capability in plugin.capabilities {
-                self.policy.set_grant(
+                policy.set_grant(
                     &entry.handle,
                     capability.kind,
                     settings.grants.iter().any(|id| id == capability.id),
@@ -127,10 +159,6 @@ impl Services {
     }
 
     pub fn providers(&self) -> HashMap<CommandId, Arc<dyn Provider>> {
-        #[cfg(not(feature = "wasm-runtime"))]
-        return HashMap::new();
-
-        #[cfg(feature = "wasm-runtime")]
         descriptors()
             .iter()
             .map(|plugin| {
@@ -138,16 +166,43 @@ impl Services {
                 let enabled = self.installed[&command].enabled.clone();
                 (
                     command,
-                    Arc::new(GuestProvider {
-                        plugin,
-                        enabled,
-                        module: OnceLock::new(),
-                    }) as Arc<dyn Provider>,
+                    match plugin.backend {
+                        Backend::NativeSystem => Arc::new(NativeProvider { enabled }) as Arc<dyn Provider>,
+                        #[cfg(feature = "wasm-runtime")]
+                        Backend::Guest { .. } => Arc::new(GuestProvider {
+                            plugin,
+                            enabled,
+                            module: OnceLock::new(),
+                        }) as Arc<dyn Provider>,
+                    },
                 )
             })
             .collect()
     }
 
+    pub fn prepare(
+        &self,
+        command: &CommandId,
+        operation: Operation,
+    ) -> Result<PreparedOperation, &'static str> {
+        let entry = self.installed.get(command).ok_or("This plugin is unavailable.")?;
+        let is_copy = matches!(operation, Operation::CopyText { .. });
+        PreparedOperation::prepare(&self.policy.lock().unwrap(), &entry.handle, operation).map_err(|error| {
+            match (is_copy, error) {
+                (true, PrepareError::Access(Access::NeedsGrant)) => {
+                    "Allow this plugin to copy results in Settings → Plugins."
+                }
+                (true, _) => "This action is no longer available.",
+                _ => "Enable this plugin and allow this action in Settings → Plugins.",
+            }
+        })
+    }
+
+    pub fn policy(&self) -> Arc<Mutex<Policy>> {
+        self.policy.clone()
+    }
+
+    #[cfg(all(test, feature = "wasm-runtime"))]
     pub fn copy(
         &self,
         command: &CommandId,
@@ -155,21 +210,37 @@ impl Services {
         is_current: impl FnOnce() -> bool,
         sink: impl FnOnce(&str),
     ) -> Result<(), &'static str> {
-        let entry = self.installed.get(command).ok_or("This plugin is unavailable.")?;
-        let copy =
-            PreparedCopy::prepare(&self.policy, &entry.handle, operation).map_err(|error| match error {
-                PrepareError::Access(Access::NeedsGrant) => {
-                    "Allow this plugin to copy results in Settings → Plugins."
-                }
-                _ => "This action is no longer available.",
-            })?;
-        copy.dispatch(&self.policy, is_current, sink)
-            .map_err(|_| "This action is no longer available.")
+        if !matches!(operation, Operation::CopyText { .. }) {
+            return Err("Unsupported operation.");
+        }
+        let copy = self.prepare(command, operation)?;
+        copy.dispatch(&self.policy.lock().unwrap(), is_current, |operation| {
+            if let Operation::CopyText { text } = operation {
+                sink(&text);
+            }
+        })
+        .map_err(|_| "This action is no longer available.")
     }
 }
 
 pub fn command_id(plugin: &Descriptor) -> CommandId {
     CommandId::new(plugin.command).expect("bundled command IDs are valid")
+}
+
+struct NativeProvider {
+    enabled: Arc<AtomicBool>,
+}
+impl Provider for NativeProvider {
+    fn search(
+        &self,
+        request: &Request,
+        emit: &mut dyn FnMut(Vec<dupin_core::Item>),
+    ) -> Result<(), ProviderError> {
+        if !self.enabled.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        dupin_mac::system_commands::SystemProvider.search(request, emit)
+    }
 }
 
 #[cfg(feature = "wasm-runtime")]
@@ -194,7 +265,10 @@ impl Provider for GuestProvider {
             version: VERSION,
             request_id: request.generation().to_string(),
             generation: request.generation().to_string(),
-            command: self.plugin.guest_command.into(),
+            command: match self.plugin.backend {
+                Backend::Guest { command, .. } => command.into(),
+                _ => return Err(ProviderError),
+            },
             query: request.query.clone(),
             limit: request.limit.min(dupin_plugin_protocol::MAX_RESULTS as usize) as u32,
             state: None,
@@ -270,7 +344,13 @@ fn module_path(plugin: &Descriptor) -> Option<PathBuf> {
                 .join(format!("dupin_{}.wasm", plugin.id)),
         );
     }
-    bundled_module_path(&std::env::current_exe().ok()?, plugin.module)
+    bundled_module_path(
+        &std::env::current_exe().ok()?,
+        match plugin.backend {
+            Backend::Guest { module, .. } => module,
+            _ => return None,
+        },
+    )
 }
 
 #[cfg(feature = "wasm-runtime")]
@@ -384,5 +464,57 @@ mod tests {
             })
             .unwrap();
         assert!(provider.module.get().is_none());
+    }
+}
+
+#[cfg(test)]
+mod native_tests {
+    use super::*;
+    #[test]
+    fn system_plugin_starts_disabled_and_each_grant_is_separate() {
+        let mut config = Config::default();
+        let mut services = Services::new(&config);
+        let command = CommandId::new("system.commands").unwrap();
+        let sleep = || Operation::SystemCommand {
+            command: dupin_plugin_protocol::SystemCommand::Sleep,
+        };
+        let lock = || Operation::SystemCommand {
+            command: dupin_plugin_protocol::SystemCommand::LockScreen,
+        };
+        assert!(services.prepare(&command, sleep()).is_err());
+        services.providers()[&command]
+            .search(&Request::detached("sleep", 2), &mut |_| panic!("disabled"))
+            .unwrap();
+        config.plugins.insert(
+            "system".into(),
+            PluginSettings {
+                enabled: true,
+                grants: vec!["system-sleep".into()],
+            },
+        );
+        services.apply_config(&config);
+        assert!(services.prepare(&command, sleep()).is_ok());
+        assert!(services.prepare(&command, lock()).is_err());
+        let mut rows = Vec::new();
+        services.providers()[&command]
+            .search(&Request::detached("sleep", 2), &mut |batch| rows.extend(batch))
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0].primary.is_none());
+        let prepared = services.prepare(&command, sleep()).unwrap();
+        config.plugins.get_mut("system").unwrap().grants.clear();
+        services.apply_config(&config);
+        config
+            .plugins
+            .get_mut("system")
+            .unwrap()
+            .grants
+            .push("system-sleep".into());
+        services.apply_config(&config);
+        assert!(
+            prepared
+                .dispatch(&services.policy.lock().unwrap(), || true, |_| panic!("stale"))
+                .is_err()
+        );
     }
 }

@@ -124,8 +124,10 @@ pub struct Ui {
     /// An update was staged while the panel showed: restart into it when the panel hides.
     relaunch: Option<Restart>,
     settings_after_close: bool,
-    /// Actions handed to Launch Services that haven't returned yet; a relaunch waits for them.
+    /// Platform actions that have not returned yet; a relaunch waits for them.
     running: Arc<AtomicUsize>,
+    operation_epoch: Arc<AtomicUsize>,
+    operation_key: String,
     updater: crate::update::Updater,
     me: AppHandle<Ui>,
     prefs: AppHandle<crate::prefs::Prefs>,
@@ -224,6 +226,8 @@ impl Ui {
             relaunch: None,
             settings_after_close: false,
             running: Arc::new(AtomicUsize::new(0)),
+            operation_epoch: Arc::new(AtomicUsize::new(0)),
+            operation_key: String::new(),
             updater,
             me,
             prefs,
@@ -610,6 +614,7 @@ impl Ui {
 
     fn deliver(&mut self, origin: CommandId, delivery: Delivery) {
         if self.session.deliver_from(origin.clone(), delivery) {
+            self.sync_operation_key();
             if self
                 .deadlines
                 .get(&origin)
@@ -635,7 +640,20 @@ impl Ui {
         }
     }
 
+    fn sync_operation_key(&mut self) {
+        let key = self
+            .session
+            .selected_item()
+            .map(|_| self.session.result_key(self.session.selected()))
+            .unwrap_or_default();
+        if self.operation_key != key {
+            self.operation_epoch.fetch_add(1, Ordering::AcqRel);
+            self.operation_key = key;
+        }
+    }
+
     fn apply(&mut self, effects: Vec<Effect>, tx: &mut Tx) {
+        self.sync_operation_key();
         for effect in effects {
             match effect {
                 Effect::ShowActions { id, generation: _ } => {
@@ -660,6 +678,7 @@ impl Ui {
                     generation,
                     query,
                 } => {
+                    self.operation_epoch.fetch_add(1, Ordering::AcqRel);
                     self.action_screen = None;
                     let spec = self.session.provider_spec(&command).expect("registered provider");
                     let limit = spec.candidate_limit();
@@ -683,6 +702,7 @@ impl Ui {
                     }
                 }
                 Effect::CancelSearch => {
+                    self.operation_epoch.fetch_add(1, Ordering::AcqRel);
                     self.action_screen = None;
                     self.searchers.values().for_each(Searcher::cancel);
                     self.deadlines.clear();
@@ -692,41 +712,84 @@ impl Ui {
                 Effect::SaveHistory => self.saver.save(self.session.history()),
                 Effect::Run(action) => {
                     let action = match action {
-                        dupin_core::Action::Host(id) => {
-                            let me = self.me.clone();
-                            let running = self.running.clone();
-                            running.fetch_add(1, Ordering::AcqRel);
-                            std::thread::spawn(move || {
-                                if let Err(error) =
-                                    dupin_mac::system_commands::dispatch(&id, dupin_mac::system_commands::run)
-                                {
-                                    me.update(move |s, tx| s.show_notice(error, tx));
-                                }
-                                running.fetch_sub(1, Ordering::AcqRel);
-                            });
-                            continue;
-                        }
                         dupin_core::Action::Plugin { command, operation } => {
                             let key = self
                                 .session
                                 .selected_item()
                                 .map(|_| self.session.result_key(self.session.selected()))
                                 .unwrap_or_default();
-                            let result = self.plugins.copy(
-                                &command,
-                                operation,
-                                || {
-                                    self.session.selected_item().is_some()
-                                        && self.session.result_key(self.session.selected()) == key
-                                },
-                                |text| tx.copy(text.to_owned()),
-                            );
-                            match result {
-                                Ok(()) => {
-                                    let effects = self.session.complete_operation(&key);
-                                    self.apply(effects, tx);
+                            let prepared = match self.plugins.prepare(&command, operation.clone()) {
+                                Ok(prepared) => prepared,
+                                Err(message) => {
+                                    self.notice = Some(message.into());
+                                    continue;
                                 }
-                                Err(message) => self.notice = Some(message.into()),
+                            };
+                            let policy = self.plugins.policy();
+                            if matches!(operation, dupin_plugin_protocol::Operation::CopyText { .. }) {
+                                let result = prepared.dispatch(
+                                    &policy.lock().unwrap(),
+                                    || {
+                                        self.session.selected_item().is_some()
+                                            && self.session.result_key(self.session.selected()) == key
+                                    },
+                                    |operation| {
+                                        if let dupin_plugin_protocol::Operation::CopyText { text } = operation
+                                        {
+                                            tx.copy(text);
+                                        }
+                                    },
+                                );
+                                match result {
+                                    Ok(()) => {
+                                        let effects = self.session.complete_operation(&key);
+                                        self.apply(effects, tx);
+                                    }
+                                    Err(_) => {
+                                        self.notice = Some("This action is no longer available.".into())
+                                    }
+                                }
+                            } else {
+                                let epoch = self.operation_epoch.clone();
+                                let expected = epoch.load(Ordering::Acquire);
+                                let running = self.running.clone();
+                                let me = self.me.clone();
+                                running.fetch_add(1, Ordering::AcqRel);
+                                std::thread::spawn(move || {
+                                    let mut accepted = None;
+                                    let result = prepared.dispatch(
+                                        &policy.lock().unwrap(),
+                                        || epoch.load(Ordering::Acquire) == expected,
+                                        |operation| accepted = Some(operation),
+                                    );
+                                    // The permit is consumed at handoff. Accepted OS operations cannot be undone.
+                                    let result = result
+                                        .map_err(|_| "This action is no longer available.".to_owned())
+                                        .and_then(|()| match accepted {
+                                            Some(dupin_plugin_protocol::Operation::SystemCommand {
+                                                command,
+                                            }) => dupin_mac::system_commands::dispatch(
+                                                command,
+                                                dupin_mac::system_commands::run,
+                                            ),
+                                            _ => Err("Unsupported operation.".into()),
+                                        });
+                                    me.update(move |s, tx| {
+                                        if epoch.load(Ordering::Acquire) == expected
+                                            && s.session.selected_item().is_some()
+                                            && s.session.result_key(s.session.selected()) == key
+                                        {
+                                            match result {
+                                                Ok(()) => {
+                                                    let effects = s.session.complete_operation(&key);
+                                                    s.apply(effects, tx);
+                                                }
+                                                Err(error) => s.show_notice(error, tx),
+                                            }
+                                        }
+                                    });
+                                    running.fetch_sub(1, Ordering::AcqRel);
+                                });
                             }
                             continue;
                         }
@@ -784,6 +847,7 @@ impl Ui {
         {
             tx.wake_at(next);
         }
+        self.sync_operation_key();
         changed
     }
 

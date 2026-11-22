@@ -2,7 +2,7 @@
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{collections::HashSet, fmt, io};
 
-pub const VERSION: u32 = 2;
+pub const VERSION: u32 = 3;
 pub const MAX_REQUEST_BYTES: usize = 16 * 1024;
 pub const MAX_RESPONSE_BYTES: usize = 256 * 1024;
 pub const MAX_RESULTS: u32 = 500;
@@ -89,6 +89,14 @@ pub struct PluginAction {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Operation {
     CopyText { text: String },
+    SystemCommand { command: SystemCommand },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SystemCommand {
+    Sleep,
+    LockScreen,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -197,6 +205,7 @@ impl Response {
                         bounded(&action.title, 512, "action.title")?;
                         match &action.operation {
                             Operation::CopyText { text } => bounded(text, MAX_COPY_BYTES, "copy.text")?,
+                            Operation::SystemCommand { .. } => {}
                         }
                         if !actions.insert(&action.id) {
                             return Err(ProtocolError::DuplicateId("action.id"));
@@ -478,6 +487,22 @@ mod tests {
         }
     }
     #[test]
+    fn system_commands_round_trip_and_unknown_commands_fail_closed() {
+        let request = request();
+        for command in [SystemCommand::Sleep, SystemCommand::LockScreen] {
+            let operation = Operation::SystemCommand { command };
+            let json = serde_json::to_vec(&operation).unwrap();
+            assert_eq!(serde_json::from_slice::<Operation>(&json).unwrap(), operation);
+        }
+        assert!(
+            serde_json::from_str::<Operation>(r#"{"kind":"system_command","command":"restart"}"#).is_err()
+        );
+        let mut old = request.clone();
+        old.version = 2;
+        assert_eq!(old.encode(), Err(ProtocolError::UnsupportedVersion));
+    }
+
+    #[test]
     fn rejects_malformed_oversize_and_unknown_versions() {
         for bytes in [b"{".as_slice(), b"\xff", b"null", b"{}"] {
             assert_eq!(Request::decode(bytes), Err(ProtocolError::InvalidJson));
@@ -491,11 +516,11 @@ mod tests {
             Err(ProtocolError::MessageTooLarge)
         );
         assert_eq!(
-            Request::decode(br#"{"version":3,"future":true}"#),
+            Request::decode(br#"{"version":999,"future":true}"#),
             Err(ProtocolError::UnsupportedVersion)
         );
         assert_eq!(
-            Response::decode(br#"{"version":3,"future":true}"#, &request()),
+            Response::decode(br#"{"version":999,"future":true}"#, &request()),
             Err(ProtocolError::UnsupportedVersion)
         );
         let deep = format!(

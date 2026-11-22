@@ -1,12 +1,13 @@
 use dupin_core::{Action, Item, ItemAction, Provider, ProviderError, Request, View, fuzzy};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SystemAction {
-    Sleep,
-    LockScreen,
-}
+use dupin_plugin_protocol::Operation;
+pub use dupin_plugin_protocol::SystemCommand as SystemAction;
 
-impl SystemAction {
+trait Presentation {
+    fn id(self) -> &'static str;
+    fn title(self) -> &'static str;
+}
+impl Presentation for SystemAction {
     fn id(self) -> &'static str {
         match self {
             Self::Sleep => "system.sleep",
@@ -63,7 +64,10 @@ impl Provider for SystemProvider {
                             SystemAction::Sleep => "Sleep Now",
                             SystemAction::LockScreen => "Lock Screen Now",
                         },
-                        Action::Host(action.id().into()),
+                        Action::Plugin {
+                            command: dupin_core::CommandId::new("system.commands").unwrap(),
+                            operation: Operation::SystemCommand { command: action },
+                        },
                     )],
                 })
             })
@@ -77,12 +81,10 @@ impl Provider for SystemProvider {
     }
 }
 
-pub fn dispatch(id: &str, runner: impl FnOnce(SystemAction) -> Result<(), String>) -> Result<(), String> {
-    let action = match id {
-        "system.sleep" => SystemAction::Sleep,
-        "system.lock-screen" => SystemAction::LockScreen,
-        _ => return Err("Unknown host action".into()),
-    };
+pub fn dispatch(
+    action: SystemAction,
+    runner: impl FnOnce(SystemAction) -> Result<(), String>,
+) -> Result<(), String> {
     runner(action).map_err(|error| format!("{} could not be carried out: {error}", action.title()))
 }
 
@@ -172,7 +174,13 @@ mod tests {
                 .unwrap();
             if let Some(action) = expected {
                 assert_eq!(items.len(), 1);
-                assert_eq!(items[0].action("run"), Some(&Action::Host(action.id().into())));
+                assert_eq!(
+                    items[0].action("run"),
+                    Some(&Action::Plugin {
+                        command: dupin_core::CommandId::new("system.commands").unwrap(),
+                        operation: Operation::SystemCommand { command: action }
+                    })
+                );
                 assert!(items[0].completion.is_none());
                 assert!(items[0].primary.is_none());
                 assert!(items[0].alternate.is_none());
@@ -190,7 +198,7 @@ mod tests {
     fn dispatch_is_typed_and_propagates_refusal_without_retry() {
         for action in [SystemAction::Sleep, SystemAction::LockScreen] {
             let mut calls = 0;
-            let result = dispatch(action.id(), |received| {
+            let result = dispatch(action, |received| {
                 calls += 1;
                 assert_eq!(received, action);
                 Err("fixture refusal".into())
@@ -198,15 +206,12 @@ mod tests {
             assert_eq!(calls, 1);
             assert!(result.unwrap_err().contains("fixture refusal"));
             assert!(
-                dispatch(action.id(), |received| {
+                dispatch(action, |received| {
                     assert_eq!(received, action);
                     Ok(())
                 })
                 .is_ok()
             );
-        }
-        for id in ["", "sleep", "system.sleep;anything", "system.restart"] {
-            assert!(dispatch(id, |_| panic!("unknown action reached runner")).is_err());
         }
     }
 }

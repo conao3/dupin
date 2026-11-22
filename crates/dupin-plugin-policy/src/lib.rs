@@ -4,6 +4,8 @@ use std::sync::Arc;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Capability {
     ClipboardWrite,
+    SystemSleep,
+    SystemLockScreen,
     CalendarRead,
 }
 

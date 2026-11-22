@@ -15,7 +15,7 @@ the guest cannot supply a handle. New installations start disabled with declared
 capabilities but no grants. Enablement and per-capability grants are separate
 explicit operations. Neither requests OS access.
 
-The policy defines clipboard write and calendar read. The calculator currently
+The policy defines clipboard write, system sleep, screen lock and calendar read. The calculator currently
 uses clipboard write; the policy also tracks calendar consent, but no provider or
 OS-consent flow is connected. Clipboard read is not available through a write
 grant. File, network, process and URL capabilities are deliberately absent until
@@ -41,9 +41,9 @@ while additions start ungranted. OS consent changes invalidate calendar permits.
 Uninstalling invalidates the handle permanently, including after reinstalling the
 same public plugin ID. Another policy instance cannot accept its handles or permits.
 
-`dupin-plugin-broker` connects typed copy operations to this policy. It checks
-payload bounds and clipboard-write access at preparation, then consumes the
-prepared copy once after rechecking its permit and a host-supplied current-query
+`dupin-plugin-broker` connects typed operations to this policy. It checks
+payload bounds and the operation-specific capability at preparation, then consumes
+the prepared operation once after rechecking its permit and a host-supplied current-query
 predicate. The launcher supplies the platform clipboard sink only after these
 checks. Both the predicate and sink belong to the trusted host, never the guest.
 
@@ -52,3 +52,21 @@ edits them without prompting macOS. Other plugins' migration and persistence,
 calendar prompt coordination, additional broker operations and a full lifecycle
 for installed plugins remain future work. Tests use synthetic policy state and
 never request or change OS permissions.
+
+System Commands is a trusted in-process native reference plugin, not a sandbox.
+It starts disabled and declares separate ungranted sleep and lock-screen
+capabilities. Enabling it, granting either capability and focusing Settings do
+not preflight OS access or request permissions. Search only produces actions;
+Enter opens review before an explicit action selection.
+
+The broker prepares a capability-specific revocable permit and revalidates it
+with query cancellation immediately before worker handoff. Revocation, disabling
+and regrant cannot revive a pending permit. The policy lock is released before
+the fixed native operation runs off the UI thread. Once handed off, an accepted
+OS operation cannot be undone; a late completion cannot dismiss a newer query.
+Lock uses the existing fixed CoreGraphics shortcut and reports missing event
+access without prompting.
+
+Manual review remains required for full sleep/wake, PreventSystemSleep,
+non-QWERTY layouts, remapped shortcuts, actual locking and OS permission refusal.
+App, file and dictionary migration remains outstanding.

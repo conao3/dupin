@@ -9,6 +9,7 @@ homepage.workspace = true
 license.workspace = true
 
 [dependencies]
+dupin-plugin-protocol.workspace = true
 dupin-core = { workspace = true }
 objc2 = { workspace = true }
 objc2-foundation = { workspace = true, features = [
