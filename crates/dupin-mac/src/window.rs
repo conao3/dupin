@@ -194,7 +194,7 @@ mod accessibility {
     use std::ffi::c_void;
     use std::ptr::NonNull;
 
-    use objc2_core_foundation::{CFRetained, CFString, CFType};
+    use objc2_core_foundation::{CFGetTypeID, CFRetained, CFString, CFType, CFTypeID};
 
     type ElementRef = *const c_void;
     type TypeRef = *const c_void;
@@ -204,6 +204,9 @@ mod accessibility {
     #[link(name = "ApplicationServices", kind = "framework")]
     unsafe extern "C" {
         fn AXIsProcessTrusted() -> u8;
+        fn AXUIElementGetTypeID() -> CFTypeID;
+        fn AXValueGetTypeID() -> CFTypeID;
+        fn AXValueGetType(value: TypeRef) -> u32;
         fn AXUIElementCreateSystemWide() -> ElementRef;
         fn AXUIElementSetMessagingTimeout(element: ElementRef, timeout: f32) -> Error;
         fn AXUIElementCopyAttributeValue(
@@ -226,7 +229,7 @@ mod accessibility {
         set_messaging_timeout(&element).then_some(element)
     }
 
-    pub(super) fn attribute(element: &CFRetained<CFType>, name: &str) -> Option<CFRetained<CFType>> {
+    pub(super) fn attribute(element: &CFType, name: &str) -> Option<CFRetained<CFType>> {
         if !set_messaging_timeout(element) {
             return None;
         }
@@ -236,7 +239,7 @@ mod accessibility {
         // returns an owned reference on success.
         let error = unsafe {
             AXUIElementCopyAttributeValue(
-                CFRetained::as_ptr(element).as_ptr().cast(),
+                std::ptr::from_ref(element).cast(),
                 CFRetained::as_ptr(&name).as_ptr(),
                 &mut value,
             )
@@ -247,23 +250,27 @@ mod accessibility {
         retained(value)
     }
 
-    fn set_messaging_timeout(element: &CFRetained<CFType>) -> bool {
+    fn set_messaging_timeout(element: &CFType) -> bool {
+        // SAFETY: The type-id query accepts every live CF object.
+        if CFGetTypeID(Some(element)) != unsafe { AXUIElementGetTypeID() } {
+            return false;
+        }
         // SAFETY: `element` is a live AXUIElement CF object returned by a Create/Copy API.
         // The finite timeout bounds calls to an unresponsive external application.
         unsafe {
-            AXUIElementSetMessagingTimeout(
-                CFRetained::as_ptr(element).as_ptr().cast(),
-                MESSAGING_TIMEOUT_SECONDS,
-            ) == 0
+            AXUIElementSetMessagingTimeout(std::ptr::from_ref(element).cast(), MESSAGING_TIMEOUT_SECONDS) == 0
         }
     }
 
-    pub(super) fn point(value: &CFRetained<CFType>) -> Option<super::AxPoint> {
+    pub(super) fn point(value: &CFType) -> Option<super::AxPoint> {
+        if !is_value_kind(value, 1) {
+            return None;
+        }
         let mut point = super::AxPoint::default();
         // SAFETY: AXPosition is specified to contain an AXValue wrapping a CGPoint.
         let success = unsafe {
             AXValueGetValue(
-                CFRetained::as_ptr(value).as_ptr().cast(),
+                std::ptr::from_ref(value).cast(),
                 1,
                 (&mut point as *mut super::AxPoint).cast(),
             )
@@ -271,12 +278,15 @@ mod accessibility {
         (success != 0).then_some(point)
     }
 
-    pub(super) fn size(value: &CFRetained<CFType>) -> Option<super::AxSize> {
+    pub(super) fn size(value: &CFType) -> Option<super::AxSize> {
+        if !is_value_kind(value, 2) {
+            return None;
+        }
         let mut size = super::AxSize::default();
         // SAFETY: AXSize is specified to contain an AXValue wrapping a CGSize.
         let success = unsafe {
             AXValueGetValue(
-                CFRetained::as_ptr(value).as_ptr().cast(),
+                std::ptr::from_ref(value).cast(),
                 2,
                 (&mut size as *mut super::AxSize).cast(),
             )
@@ -284,10 +294,30 @@ mod accessibility {
         (success != 0).then_some(size)
     }
 
+    fn is_value_kind(value: &CFType, kind: u32) -> bool {
+        // SAFETY: Check the CF object type before passing it to the AXValue-only query.
+        unsafe {
+            CFGetTypeID(Some(value)) == AXValueGetTypeID()
+                && AXValueGetType(std::ptr::from_ref(value).cast()) == kind
+        }
+    }
+
     fn retained(value: TypeRef) -> Option<CFRetained<CFType>> {
         let value = NonNull::new(value.cast_mut().cast::<CFType>())?;
         // SAFETY: AX Create/Copy functions return an owned +1 CF reference.
         Some(unsafe { CFRetained::from_raw(value) })
+    }
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn rejects_other_cf_object_types_before_reading_ax_values_or_elements() {
+            let string = CFString::from_str("not an AX object");
+            assert!(point(&string).is_none());
+            assert!(size(&string).is_none());
+            assert!(attribute(&string, "AXFocusedWindow").is_none());
+        }
     }
 }
 
