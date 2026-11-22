@@ -34,6 +34,10 @@ rustPlatform.buildRustPackage {
   dontStrip = true;
   doCheck = true;
 
+  prePatch = ''
+    export NIX_RUSTFLAGS="''${NIX_RUSTFLAGS-} --remap-path-prefix=$cargoDepsCopy=/vendor"
+  '';
+
   # The standard Cargo hooks select the native target; this resource is bare Wasm.
   buildPhase = ''
     runHook preBuild
