@@ -1,0 +1,21 @@
+{
+	"version": 2,
+	"request_id": "fixture-1",
+	"generation": "1",
+	"command": "currency",
+	"query": "30*(60+1) usd in jpy",
+	"limit": 1,
+	"state": {
+		"version": 1,
+		"data": {
+			"base": "USD",
+			"observation_date": "2026-01-15",
+			"fixture": true,
+			"rates": [
+				{ "code": "USD", "rate": 1 },
+				{ "code": "JPY", "rate": 150 },
+				{ "code": "GBP", "rate": 0.75 }
+			]
+		}
+	}
+}

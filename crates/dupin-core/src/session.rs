@@ -145,13 +145,25 @@ impl Session {
         })
     }
 
-    pub fn set_commands(&mut self, commands: CommandRegistry) -> Result<(), crate::CommandError> {
+    pub fn set_commands(&mut self, commands: CommandRegistry) -> Result<Vec<Effect>, crate::CommandError> {
         commands.validate()?;
         if !commands.contains(&self.command) {
             return Err(crate::CommandError::ActiveCommandRemoved(self.command.clone()));
         }
+        let previous = self.provider_ids();
+        let pin = self.commands.pinned().cloned();
         self.commands = commands;
-        Ok(())
+        if self.provider_ids() != previous || self.commands.pinned() != pin.as_ref() {
+            let running = matches!(self.results, Results::Searching { .. });
+            self.clear_results();
+            let effects = self.search();
+            return Ok(if effects.is_empty() && running {
+                vec![Effect::CancelSearch]
+            } else {
+                effects
+            });
+        }
+        Ok(Vec::new())
     }
 
     /// The same, with a clock in Unix seconds other than the system's.
@@ -225,7 +237,31 @@ impl Session {
     }
 
     fn activate(&mut self, item: &Item, action: Action) -> Vec<Effect> {
+        if matches!(action, Action::Plugin { .. }) {
+            return vec![Effect::Run(action)];
+        }
         let mut effects = vec![Effect::Run(action)];
+        effects.extend(self.finish_activation(item));
+        effects
+    }
+
+    pub fn complete_operation(&mut self, key: &str) -> Vec<Effect> {
+        if !self.select_key(key) {
+            return Vec::new();
+        }
+        let item = self.items[self.selected].clone();
+        if !item
+            .actions
+            .iter()
+            .any(|action| matches!(action.action, Action::Plugin { .. }))
+        {
+            return Vec::new();
+        }
+        self.finish_activation(&item)
+    }
+
+    fn finish_activation(&mut self, item: &Item) -> Vec<Effect> {
+        let mut effects = Vec::new();
         if item.record_usage {
             self.history.record(&item.id, &self.query, (self.clock)());
             effects.push(Effect::SaveHistory);

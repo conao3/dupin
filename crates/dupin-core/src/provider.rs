@@ -40,6 +40,10 @@ impl Request {
     pub fn is_cancelled(&self) -> bool {
         self.current.load(Ordering::Acquire) != self.generation
     }
+
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
 }
 
 #[derive(Debug)]

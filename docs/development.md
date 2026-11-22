@@ -68,7 +68,16 @@ authentication, warmup or native E2E succeeded.
 
 ## Dependency builds
 
-The version lives in `VERSION` (see [releasing](./releasing.md)). `package.nix` holds the hash of the vendored Cargo dependencies; after `Cargo.lock` changes, refresh it with `nu scripts/update-cargo-hash.nu` (nix-update). The vendor derivation's name carries `Cargo.lock`'s hash, so a stale hash fails the next local build instead of only CI. On every pull request, the autofix.ci workflow runs the same script and pushes the refreshed hash.
+The version lives in `VERSION` (see [releasing](./releasing.md)). `package.nix` holds the hash of the root workspace's vendored Cargo dependencies; after `Cargo.lock` changes, refresh it with `nu scripts/update-cargo-hash.nu` (nix-update). The standalone Wasm guest workspaces have their own locks and fixed-output hashes. Refresh those from their wrapper files:
+
+```sh
+nu scripts/update-cargo-hash.nu calculator-plugin --file nix/calculator-plugin.nix
+nu scripts/update-cargo-hash.nu currency-guest --file nix/currency-guest.nix
+```
+
+The currency guest is a fixed-rate fixture for runtime tests, not a launcher feature. The vendor derivation's name carries its Cargo lock's hash, so a stale hash fails the next local build instead of only CI. On every pull request, the autofix.ci workflow refreshes the root, calculator and currency-guest hashes with these commands and pushes any changes.
+
+Nix builds the calculator as a separate bare Wasm resource and bundles it into `dupin.app`. `dupin-no-wasm` builds the same launcher with the Wasm runtime disabled; it is useful for checking the runtime's contribution independently of guest code and does not show calculator results. Build either package with `nix build .#dupin` or `nix build .#dupin-no-wasm`.
 
 Flake builds share compiled dependencies separately for release and debug.
 The [Nix cache experiment](../experiments/nix-cargo-cache/README.md) compares

@@ -55,7 +55,9 @@ let
   };
   releaseArgs = baseArgs // {
     CARGO_PROFILE = "release";
-    cargoExtraArgs = "--offline --locked --package dupin";
+    cargoExtraArgs =
+      "--offline --locked --package dupin"
+      + pkgs.lib.optionalString (!native.withWasm) " --no-default-features";
     doCheck = false;
   };
   debugArgs = baseArgs // {
@@ -70,8 +72,14 @@ let
     // {
       pname = "dupin-lint-and-test";
       cargoArtifacts = debugArtifacts;
-      buildPhaseCargoCommand = "cargo clippy --workspace --all-targets --offline --locked -- -D warnings";
-      checkPhaseCargoCommand = "cargo test --workspace --offline --locked";
+      buildPhaseCargoCommand = ''
+        cargo clippy --workspace --all-targets --offline --locked -- -D warnings
+        cargo clippy -p dupin --all-targets --no-default-features --offline --locked -- -D warnings
+      '';
+      checkPhaseCargoCommand = ''
+        cargo test --workspace --offline --locked
+        cargo test -p dupin --no-default-features --offline --locked
+      '';
       doCheck = true;
       doInstallCargoArtifacts = false;
       installPhaseCommand = "touch $out";
@@ -86,31 +94,33 @@ let
     }
   );
 in
-pkgs.stdenv.mkDerivation (
-  packagingArgs
-  // {
-    inherit (commonArgs) pname version;
-    src = bundleSrc;
-    dontConfigure = true;
-    dontBuild = true;
-    installPhase = ''
-      runHook preInstall
-      mkdir -p "$out/bin"
-      install -m755 ${cargoBinary}/bin/dupin "$out/bin/dupin"
-      runHook postInstall
-    '';
-    passthru = {
-      inherit
-        commonArgs
-        packagingArgs
-        releaseArtifacts
-        debugArtifacts
-        lintAndTest
-        cargoVendorDir
-        cargoBinary
-        ;
-      inherit (commonArgs) cargoDeps;
-      baseline = native;
-    };
-  }
+native.wrapApplication (
+  pkgs.stdenv.mkDerivation (
+    packagingArgs
+    // {
+      inherit (commonArgs) pname version;
+      src = bundleSrc;
+      dontConfigure = true;
+      dontBuild = true;
+      installPhase = ''
+        runHook preInstall
+        mkdir -p "$out/bin"
+        install -m755 ${cargoBinary}/bin/dupin "$out/bin/dupin"
+        runHook postInstall
+      '';
+      passthru = {
+        inherit
+          commonArgs
+          packagingArgs
+          releaseArtifacts
+          debugArtifacts
+          lintAndTest
+          cargoVendorDir
+          cargoBinary
+          ;
+        inherit (commonArgs) cargoDeps;
+        baseline = native;
+      };
+    }
+  )
 )

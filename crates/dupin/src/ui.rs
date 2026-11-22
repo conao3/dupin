@@ -114,6 +114,7 @@ pub struct Ui {
     web: Arc<RwLock<crate::web::WebCatalog>>,
     file_demotions: Arc<RwLock<Vec<String>>>,
     deadlines: HashMap<CommandId, (u64, f64)>,
+    plugins: crate::plugins::Services,
     _apps_watcher: Option<AppsWatcher>,
     saver: crate::store::Saver,
     position: Position,
@@ -153,7 +154,8 @@ impl Ui {
     ) -> Ui {
         let config = configuration.values.borrow().clone();
         let apps_provider = Arc::new(AppsProvider::standard());
-        let registration = crate::commands::register(&config, apps_provider.clone())
+        let plugins = crate::plugins::Services::new(&config);
+        let registration = crate::commands::register(&config, apps_provider.clone(), &plugins)
             .expect("built-in command registration is valid");
         let apps_watcher = apps_provider.watch({
             let me = me.clone();
@@ -213,6 +215,7 @@ impl Ui {
             web: registration.web,
             file_demotions: registration.file_demotions,
             deadlines: HashMap::new(),
+            plugins,
             _apps_watcher: apps_watcher,
             position: config.position,
             input_source: config.input_source.clone(),
@@ -229,6 +232,7 @@ impl Ui {
 
     pub fn apply_config(&mut self, config: &Config, tx: &mut Tx) {
         let previous_limit = self.session.command().result_limit;
+        self.plugins.apply_config(config);
         let ranking_changed = {
             let mut rules = self.file_demotions.write().unwrap();
             let changed = *rules != config.file_demotions;
@@ -245,9 +249,11 @@ impl Ui {
             *web = registration.web;
             changed
         };
-        self.session
+        let effects = self
+            .session
             .set_commands(registration.registry)
             .expect("built-in command registration is valid");
+        self.apply(effects, tx);
         self.registration_notice = registration.notice;
         if self.session.command().result_limit != previous_limit
             || (web_changed && self.session.command_id().as_str() == crate::commands::APPS)
@@ -372,7 +378,9 @@ impl Ui {
 
     /// The hotkey: show the panel, or hide it when it already shows.
     pub fn toggle(&mut self, tx: &mut Tx) {
-        if self.me.is_visible() {
+        let visible = self.me.is_visible();
+        crate::trace::panel("toggle", visible, self.shown);
+        if visible {
             self.dismiss(tx);
         } else {
             self.show(tx);
@@ -437,6 +445,7 @@ impl Ui {
     }
 
     pub fn closed(&mut self, _: &mut Tx) {
+        crate::trace::panel("closed", self.me.is_visible(), self.shown);
         if std::mem::take(&mut self.settings_after_close) {
             crate::trace::settings("panel closed");
             self.prefs.open();
@@ -444,6 +453,7 @@ impl Ui {
     }
 
     fn hide(&mut self, tx: &mut Tx) {
+        crate::trace::panel("hide", self.me.is_visible(), self.shown);
         self.action_screen = None;
         if let Some(previous) = self.restore_input.take() {
             previous.restore();
@@ -694,6 +704,30 @@ impl Ui {
                                 }
                                 running.fetch_sub(1, Ordering::AcqRel);
                             });
+                            continue;
+                        }
+                        dupin_core::Action::Plugin { command, operation } => {
+                            let key = self
+                                .session
+                                .selected_item()
+                                .map(|_| self.session.result_key(self.session.selected()))
+                                .unwrap_or_default();
+                            let result = self.plugins.copy(
+                                &command,
+                                operation,
+                                || {
+                                    self.session.selected_item().is_some()
+                                        && self.session.result_key(self.session.selected()) == key
+                                },
+                                |text| tx.copy(text.to_owned()),
+                            );
+                            match result {
+                                Ok(()) => {
+                                    let effects = self.session.complete_operation(&key);
+                                    self.apply(effects, tx);
+                                }
+                                Err(message) => self.notice = Some(message.into()),
+                            }
                             continue;
                         }
                         dupin_core::Action::Copy(text) => {

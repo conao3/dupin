@@ -375,31 +375,7 @@ fn content_card(s: &Ui, item: &Item, index: usize, on: bool, t: &tok::Theme, acc
             .max_h(340.0)
             .scroll(ScrollSpec { stick_bottom: false })
             .child(detail_body(&s.session.layout_key(index), body, t)),
-        View::Pair { source, result } => row()
-            .key(format!("{}-pair", row_key(&s.session.layout_key(index))))
-            .w_full()
-            .gap(16.0)
-            .center_y()
-            .selection_group(true)
-            .child(pair_value(
-                &s.session.layout_key(index),
-                "source",
-                source,
-                "Source",
-                t,
-            ))
-            .child(
-                text("→")
-                    .font(TextStyle::new(28.0, 400.0))
-                    .color(t.text_secondary),
-            )
-            .child(pair_value(
-                &s.session.layout_key(index),
-                "result",
-                result,
-                "Result",
-                t,
-            )),
+        View::Pair { source, result } => pair_body(&s.session.layout_key(index), source, result, t),
         View::Text { .. } => unreachable!("text row"),
     };
     col()
@@ -410,9 +386,33 @@ fn content_card(s: &Ui, item: &Item, index: usize, on: bool, t: &tok::Theme, acc
         .child(card.child(body))
 }
 
-fn pair_value(id: &str, part: &str, value: &str, label: &str, t: &tok::Theme) -> El {
-    col()
-        .grow(1.0)
+fn pair_body(id: &str, source: &str, result: &str, t: &tok::Theme) -> El {
+    let stacked = source.chars().count() > 20 || result.chars().count() > 20;
+    let values = if stacked { col() } else { row() };
+    let arrow = text(if stacked { "↓" } else { "→" });
+    let arrow = if stacked { arrow.w_full() } else { arrow };
+    values
+        .key(format!("{}-pair", row_key(id)))
+        .w_full()
+        .shrink()
+        .max_h(340.0)
+        .scroll(ScrollSpec { stick_bottom: false })
+        .gap(16.0)
+        .center_y()
+        .selection_group(true)
+        .child(pair_value(id, "source", source, "Source", stacked, t))
+        .child(
+            arrow
+                .font(TextStyle::new(28.0, 400.0))
+                .align(Align::Center)
+                .color(t.text_secondary),
+        )
+        .child(pair_value(id, "result", result, "Result", stacked, t))
+}
+
+fn pair_value(id: &str, part: &str, value: &str, label: &str, stacked: bool, t: &tok::Theme) -> El {
+    let value_col = if stacked { col().w_full() } else { col().grow(1.0) };
+    value_col
         .min_w(0.0)
         .gap(6.0)
         .child(

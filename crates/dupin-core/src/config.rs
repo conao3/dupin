@@ -4,6 +4,13 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct PluginSettings {
+    pub enabled: bool,
+    pub grants: Vec<String>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
@@ -17,6 +24,7 @@ pub struct Config {
     pub file_demotions: Vec<String>,
     /// Keywords followed by Space that enter macOS Dictionary search.
     pub dictionary_keywords: Vec<String>,
+    pub plugins: BTreeMap<String, PluginSettings>,
     /// Web search keywords and their URL templates. `{query}` is replaced when selected.
     pub web_searches: BTreeMap<String, WebSearch>,
     /// Web search keywords offered when no regular results match.
@@ -138,6 +146,7 @@ impl Default for Config {
             .map(str::to_owned)
             .collect(),
             dictionary_keywords: vec!["define".into(), "d".into()],
+            plugins: BTreeMap::new(),
             web_searches: BTreeMap::from([
                 (
                     "g".into(),
@@ -214,6 +223,17 @@ mod tests {
         assert_eq!(Config::parse("").unwrap().dictionary_keywords, ["define", "d"]);
         let config = Config::parse("dictionary_keywords = [\"word\", \"lookup\"]").unwrap();
         assert_eq!(config.dictionary_keywords, ["word", "lookup"]);
+    }
+
+    #[test]
+    fn plugin_enablement_and_grants_are_separate_settings() {
+        let config =
+            Config::parse("[plugins.calculator]\nenabled = true\ngrants = [\"clipboard-write\"]").unwrap();
+        assert!(config.plugins["calculator"].enabled);
+        assert_eq!(config.plugins["calculator"].grants, ["clipboard-write"]);
+        let disabled = Config::parse("[plugins.calculator]\ngrants = [\"clipboard-write\"]").unwrap();
+        assert!(!disabled.plugins["calculator"].enabled);
+        assert!(Config::parse("[plugins.calculator]\nunknown = true").is_err());
     }
 
     #[test]

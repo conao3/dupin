@@ -58,15 +58,26 @@ fn anchor(key: &str) -> String {
 enum Page {
     General,
     Search,
+    Plugins,
     Appearance,
     Updates,
 }
 
 impl Page {
+    fn all() -> Vec<Page> {
+        let mut pages = vec![Page::General, Page::Search];
+        if !crate::plugins::descriptors().is_empty() {
+            pages.push(Page::Plugins);
+        }
+        pages.push(Page::Appearance);
+        pages
+    }
+
     fn title(self) -> &'static str {
         match self {
             Page::General => "General",
             Page::Search => "Search",
+            Page::Plugins => "Plugins",
             Page::Appearance => "Appearance",
             Page::Updates => "Updates",
         }
@@ -77,6 +88,7 @@ impl Page {
         match self {
             Page::General => "page-general",
             Page::Search => "page-search",
+            Page::Plugins => "page-plugins",
             Page::Appearance => "page-appearance",
             Page::Updates => "page-updates",
         }
@@ -86,6 +98,7 @@ impl Page {
         match self {
             Page::General => &icons::SLIDERS,
             Page::Search => &icons::SEARCH,
+            Page::Plugins => &icons::SPARKLES,
             Page::Appearance => &icons::SPARKLES,
             Page::Updates => &icons::REFRESH,
         }
@@ -416,6 +429,7 @@ pub fn view(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
     let rows = match s.page {
         Page::General => general(s, k),
         Page::Search => search(s, k),
+        Page::Plugins => plugins(s, k),
         Page::Appearance => appearance(s, k),
         Page::Updates => updates(s, k),
     };
@@ -485,7 +499,7 @@ fn sidebar(s: &Prefs, k: &Kit) -> El {
         .focus_group()
         .focus_follows()
         .gap(4.0);
-    for page in [Page::General, Page::Search, Page::Appearance] {
+    for page in Page::all() {
         let on = s.page == page;
         let mut item = row()
             .key(page.key())
@@ -671,6 +685,59 @@ fn general(s: &Prefs, k: &Kit) -> Vec<El> {
             relaunch,
         ),
     ]
+}
+
+fn plugins(s: &Prefs, k: &Kit) -> Vec<El> {
+    let mut rows = Vec::new();
+    for plugin in crate::plugins::descriptors() {
+        let current = crate::plugins::settings(&s.config, plugin);
+        let enabled = Switch::new(current.enabled)
+            .label(plugin.title)
+            .hide_label()
+            .disabled(s.read_only)
+            .on_toggle(move |s: &mut Prefs| {
+                s.set(|config| {
+                    let mut settings = crate::plugins::settings(config, plugin);
+                    settings.enabled = !settings.enabled;
+                    config.plugins.insert(plugin.id.into(), settings);
+                })
+            })
+            .build(k);
+        rows.push(setting(
+            k,
+            &icons::SPARKLES,
+            plugin.title,
+            Some(plugin.description),
+            enabled,
+        ));
+        for capability in plugin.capabilities {
+            let granted = current.grants.iter().any(|id| id == capability.id);
+            let grant = Switch::new(granted)
+                .label(capability.title)
+                .hide_label()
+                .disabled(s.read_only || !current.enabled)
+                .on_toggle(move |s: &mut Prefs| {
+                    s.set(|config| {
+                        let mut settings = crate::plugins::settings(config, plugin);
+                        if settings.grants.iter().any(|id| id == capability.id) {
+                            settings.grants.retain(|id| id != capability.id);
+                        } else {
+                            settings.grants.push(capability.id.into());
+                        }
+                        config.plugins.insert(plugin.id.into(), settings);
+                    })
+                })
+                .build(k);
+            rows.push(setting(
+                k,
+                &icons::SPARKLES,
+                capability.title,
+                Some(capability.description),
+                grant,
+            ));
+        }
+    }
+    rows
 }
 
 fn search(s: &Prefs, k: &Kit) -> Vec<El> {

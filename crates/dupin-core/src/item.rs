@@ -16,6 +16,10 @@ pub enum Action {
     OpenPreferences,
     /// Dispatch an opaque host-owned operation.
     Host(String),
+    Plugin {
+        command: crate::CommandId,
+        operation: dupin_plugin_protocol::Operation,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

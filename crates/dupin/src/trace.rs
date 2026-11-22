@@ -1,10 +1,10 @@
-//! `DUPIN_TRACE=1`: print when the launch hotkey is registered, how long each summon takes,
+//! `DUPIN_TRACE=1`: print app readiness and hotkey registration, how long each summon takes,
 //! from the hotkey handler to the first frame drawn after it, every drawn frame's offset, and
 //! each key and edit the query field sees, to stderr. Off, it costs one branch.
 
 use std::cell::Cell;
 use std::sync::OnceLock;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use rune::{FrameEncoded, FrameOutcome};
 
@@ -16,6 +16,26 @@ fn on() -> bool {
 pub fn settings(event: &str) {
     if on() {
         eprintln!("dupin-trace: settings {event} wall={:.3}", wall_ms());
+    }
+}
+
+/// The panel window is ready after process startup and native panel setup.
+pub fn ready(startup: Duration) {
+    if on() {
+        eprintln!(
+            "dupin-trace: ready pid={} startup_ms={:.3}",
+            std::process::id(),
+            startup.as_secs_f64() * 1000.0
+        );
+    }
+}
+
+pub fn panel(event: &str, visible: bool, shown: bool) {
+    if on() {
+        eprintln!(
+            "dupin-trace: panel {event} visible={visible} shown={shown} wall={:.3}",
+            wall_ms()
+        );
     }
 }
 

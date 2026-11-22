@@ -3,7 +3,7 @@
     { config, pkgs, ... }:
     {
       devShells.default = pkgs.mkShell {
-        inputsFrom = [ config.packages.dupin.baseline ];
+        inputsFrom = [ config.packages.dupin.baseline.nativeApplication ];
         packages =
           with pkgs;
           [

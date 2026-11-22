@@ -3,13 +3,24 @@
   perSystem =
     { pkgs, ... }:
     let
-      native = pkgs.callPackage ../package.nix { };
-      dupin = import ./cargo-artifacts.nix {
-        inherit pkgs;
-        inherit (inputs) crane;
-        inherit native;
-      };
       blacksmith = pkgs.callPackage ./blacksmith.nix { };
+      calculator-plugin = pkgs.callPackage ./calculator-plugin.nix { };
+      currency-guest = pkgs.callPackage ./currency-guest.nix { };
+      minimal-plugin = pkgs.runCommand "dupin-minimal-plugin" { nativeBuildInputs = [ pkgs.wabt ]; } ''
+        mkdir -p $out/share/dupin/plugins
+        wat2wasm ${../experiments/wasm-app-size/minimal-plugin.wat} \
+          -o $out/share/dupin/plugins/minimal.wasm
+      '';
+      native = pkgs.callPackage ../package.nix { calculatorPlugin = calculator-plugin; };
+      cached =
+        baseline:
+        import ./cargo-artifacts.nix {
+          inherit pkgs;
+          inherit (inputs) crane;
+          native = baseline;
+        };
+      dupin = cached native;
+      dupin-no-wasm = cached (native.override { withWasm = false; });
       # scripts/package-app.nu lays out Dupin.dmg over this.
       dmg-background =
         pkgs.runCommand "dupin-dmg-background"
@@ -27,7 +38,15 @@
     in
     {
       packages = {
-        inherit dupin dmg-background blacksmith;
+        inherit
+          dupin
+          dupin-no-wasm
+          blacksmith
+          dmg-background
+          calculator-plugin
+          currency-guest
+          minimal-plugin
+          ;
         default = dupin;
       };
     };

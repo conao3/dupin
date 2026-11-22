@@ -1,0 +1,20 @@
+[package]
+name = "dupin-calculator"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+resolver = "3"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+dupin-plugin-protocol = { path = "../../crates/dupin-plugin-protocol" }
+fend-core = "=1.5.9"
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+strip = true

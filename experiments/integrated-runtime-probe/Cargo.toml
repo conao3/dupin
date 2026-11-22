@@ -1,0 +1,20 @@
+[package]
+name = "dupin-integrated-runtime-probe"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+resolver = "3"
+
+[dependencies]
+dupin-plugin-protocol = { path = "../../crates/dupin-plugin-protocol" }
+dupin-plugin-runtime = { path = "../../crates/dupin-plugin-runtime" }
+serde_json = "1"
+dupin-calculator = { path = "../../plugins/calculator" }
+dupin-currency-guest = { path = "../currency-guest" }
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+strip = true

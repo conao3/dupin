@@ -20,6 +20,7 @@ export type Scenario = {
 	keyword?: string;
 	detail?: string;
 	actions?: boolean;
+	result?: string;
 	query: string;
 	/** The rows after each prefix of `query`. */
 	steps: Record<string, Row[]>;
@@ -171,6 +172,11 @@ const scenarios = {
 			tahoe: tah,
 		},
 	},
+	calculator: {
+		query: '560km to mi',
+		result: 'approx. 347.9678676529 mi',
+		steps: {},
+	},
 } satisfies Record<string, Scenario>;
 
 export const marking = (mode: Scenario['mode']): Marking =>
@@ -178,6 +184,7 @@ export const marking = (mode: Scenario['mode']): Marking =>
 
 export const features = [
 	{ label: 'Apps', scenario: scenarios.apps },
+	{ label: 'Calculator', scenario: scenarios.calculator },
 	{ label: 'Files', scenario: scenarios.files },
 	{ label: 'In files', scenario: scenarios.contents },
 	{

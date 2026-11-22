@@ -746,6 +746,10 @@ version = "0.0.0"
 dependencies = [
  "dupin-core",
  "dupin-mac",
+ "dupin-plugin-broker",
+ "dupin-plugin-policy",
+ "dupin-plugin-protocol",
+ "dupin-plugin-runtime",
  "libc",
  "naga",
  "objc2 0.6.5",
@@ -783,6 +787,14 @@ dependencies = [
  "objc2-core-foundation",
  "objc2-core-text",
  "objc2-foundation 0.3.2",
+]
+
+[[package]]
+name = "dupin-plugin-broker"
+version = "0.0.0"
+dependencies = [
+ "dupin-plugin-policy",
+ "dupin-plugin-protocol",
 ]
 
 [[package]]

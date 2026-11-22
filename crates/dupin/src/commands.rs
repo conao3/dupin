@@ -151,17 +151,6 @@ pub fn configured(config: &Config) -> Result<ConfiguredCommands, dupin_core::Com
         2,
         presentation("System commands", None, None, None, false, 0.0),
     ))?;
-    registry.set_default_providers(
-        vec![
-            apps_id,
-            id(SETTINGS),
-            id(SYSTEM),
-            id(WEB_KEYWORDS),
-            id(WEB_FALLBACKS),
-        ],
-        Some(id(WEB_KEYWORDS)),
-    )?;
-
     registry.add_keyword(&contents_id, "in")?;
     let mut rejected = Vec::new();
     for keyword in &config.dictionary_keywords {
@@ -176,6 +165,28 @@ pub fn configured(config: &Config) -> Result<ConfiguredCommands, dupin_core::Com
         )
     });
 
+    let mut defaults = Vec::new();
+    for plugin in crate::plugins::descriptors() {
+        let command = crate::plugins::command_id(plugin);
+        let mut spec = CommandSpec::new(
+            command.clone(),
+            1,
+            presentation(plugin.title, Some(plugin.title), None, None, false, 0.0),
+        );
+        spec.deadline = crate::plugins::DEADLINE;
+        registry.register(spec)?;
+        if crate::plugins::settings(config, plugin).enabled {
+            defaults.push(command);
+        }
+    }
+    defaults.extend([
+        id(APPS),
+        id(SETTINGS),
+        id(SYSTEM),
+        id(WEB_KEYWORDS),
+        id(WEB_FALLBACKS),
+    ]);
+    registry.set_default_providers(defaults, Some(id(WEB_KEYWORDS)))?;
     let (web, web_notice) =
         crate::web::WebCatalog::compile(config, |keyword| registry.keyword(keyword).is_some());
     let notices: Vec<_> = [dictionary_notice, web_notice].into_iter().flatten().collect();
@@ -187,7 +198,11 @@ pub fn configured(config: &Config) -> Result<ConfiguredCommands, dupin_core::Com
     })
 }
 
-pub fn register(config: &Config, apps: Arc<AppsProvider>) -> Result<Registration, dupin_core::CommandError> {
+pub fn register(
+    config: &Config,
+    apps: Arc<AppsProvider>,
+    plugins: &crate::plugins::Services,
+) -> Result<Registration, dupin_core::CommandError> {
     let ConfiguredCommands {
         registry,
         notice,
@@ -199,7 +214,7 @@ pub fn register(config: &Config, apps: Arc<AppsProvider>) -> Result<Registration
     let contents_id = id(CONTENTS);
     let dictionary_id = id(DICTIONARY);
     let file_demotions = Arc::new(RwLock::new(config.file_demotions.clone()));
-    let providers: HashMap<_, Arc<dyn Provider>> = [
+    let mut providers: HashMap<_, Arc<dyn Provider>> = [
         (apps_id, apps as Arc<dyn Provider>),
         (
             id(SYSTEM),
@@ -234,6 +249,7 @@ pub fn register(config: &Config, apps: Arc<AppsProvider>) -> Result<Registration
         ),
     ]
     .into();
+    providers.extend(plugins.providers());
 
     Ok(Registration {
         registry,
@@ -247,6 +263,69 @@ pub fn register(config: &Config, apps: Arc<AppsProvider>) -> Result<Registration
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "wasm-runtime")]
+    #[test]
+    fn calculator_answers_precede_apps_and_explicit_web_keywords_precede_both() {
+        use dupin_core::{Delivery, Effect, History, Item, Request, Session};
+
+        let mut config = Config::default();
+        config.web_searches.insert(
+            "pi".into(),
+            dupin_core::config::WebSearch {
+                name: "Pi documentation".into(),
+                url: "https://example.com/search?q={query}".into(),
+            },
+        );
+        let plugin = crate::plugins::command_id(&crate::plugins::descriptors()[0]);
+        for query in ["2+2", "pi"] {
+            for order in [[0, 1, 2], [2, 1, 0], [1, 0, 2]] {
+                let configured = configured(&config).unwrap();
+                let web = crate::web::WebProvider::new(Arc::new(RwLock::new(configured.web)), false);
+                let mut session = Session::new(History::default(), configured.registry).unwrap();
+                let effects = session.set_query(query);
+                let generation = effects
+                    .iter()
+                    .find_map(|effect| match effect {
+                        Effect::Search { generation, .. } => Some(*generation),
+                        _ => None,
+                    })
+                    .unwrap();
+                let answer = Item::path("/fixture/answer".into(), "Answer".into(), vec![]);
+                let app = Item::path("/fixture/app".into(), "App".into(), vec![]);
+                let mut web_items = Vec::new();
+                web.search(&Request::detached(query, 1), &mut |rows| web_items.extend(rows))
+                    .unwrap();
+                assert_eq!(web_items.len(), usize::from(query == "pi"));
+                let mut expected = vec![answer.id.clone(), app.id.clone()];
+                if let Some(web_item) = web_items.first() {
+                    expected.insert(0, web_item.id.clone());
+                }
+                let providers = [
+                    (id(APPS), vec![app]),
+                    (plugin.clone(), vec![answer]),
+                    (id(WEB_KEYWORDS), web_items),
+                ];
+                for index in order {
+                    let (origin, rows) = &providers[index];
+                    let delivery = if rows.is_empty() {
+                        Delivery::Done { generation }
+                    } else {
+                        Delivery::Batch {
+                            generation,
+                            items: rows.clone(),
+                        }
+                    };
+                    assert!(session.deliver_from(origin.clone(), delivery));
+                }
+                assert_eq!(
+                    session.items().iter().map(|item| &item.id).collect::<Vec<_>>(),
+                    expected.iter().collect::<Vec<_>>()
+                );
+                assert_eq!(session.selected(), 0);
+            }
+        }
+    }
 
     #[test]
     fn system_results_require_current_explicit_activation() {

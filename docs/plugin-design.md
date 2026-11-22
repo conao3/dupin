@@ -1,13 +1,16 @@
 # Plugin design proposal
 
-Status: proposed contract, not an implemented API. Tracks #6, #7, #17 and #96.
+Status: internal implementation is underway; this document describes the broader
+proposed external-plugin contract, not a stable public API. Tracks #6, #7, #17
+and #96.
 
 ## Product boundary
 
 Dupin provides an input field, input routing, result selection, host-rendered views,
-actions and plugin execution. App search, file search, dictionary, calculator,
-currency and calendar are feature plugins. First-party distribution does not give
-a plugin an implicit permission grant.
+actions and plugin execution. App search, file search and dictionary are still
+native providers; the calculator runs as a bundled Wasm plugin. Currency and
+calendar remain planned plugins. First-party distribution does not give a plugin
+an implicit permission grant.
 
 The everyday experience stays as simple as Alfred: summon, type, choose. Rich
 views appear when a task needs them. Saved snapshots have a separate searchable
@@ -15,16 +18,19 @@ window; an always-visible tab system is not a prerequisite.
 
 ## Runtime decision gate
 
-Wasm is the first candidate, not a settled dependency. Compare the native
-calculator prototype with the same calculation compiled to Wasm. Measure the
-release executable and complete app bundle, packaged plugin bytes, cold load,
-warm query latency, cancellation and peak/idle memory. Use the repository's
-release settings and record exact runtime versions and features.
+The bundled calculator currently uses Wasmi 2.0.2 with eager module translation.
+The implementation is a runtime candidate; the app-level adoption gate below
+still needs measurements before its size and performance costs are accepted.
+Compare the same release code with and without the runtime, then measure the
+complete app bundles, packaged plugin bytes, cold load, warm query latency,
+cancellation and peak/idle memory.
 
-A small standalone runtime host can reject a clearly unsuitable runtime, but its
-size delta does not prove the app's final bundle delta. The adoption decision
-requires an app-level measurement. Compare an interpreter with a compiled runtime
-before choosing compilation caching or shipping a compiler in the bundle.
+A standalone runtime host can reject a clearly unsuitable runtime, but its size
+delta does not prove the app's final bundle delta. The adoption decision requires
+an app-level measurement. Historical Wasmi and Wasmtime benchmark results are
+not measurements of the current eager Wasmi integration. Compare an interpreter
+with a compiled runtime before choosing compilation caching or shipping a
+compiler in the bundle.
 
 Before adoption measurements, pin the baseline commit, toolchain, architecture and
 release flags in a checked-in script. Measure stripped executable, complete `.app`
@@ -41,10 +47,11 @@ Guest traps are contained; native host-import bugs remain host failures.
 
 ## Manifest and registration
 
-The launcher uses an internal host-owned command registry for bundled providers.
-Qualified command IDs identify the feature plugin and its command; query routing,
-recall, result limits and query presentation use those registrations. The host
-also owns the default command, the empty-query Space route and keyword ownership.
+The launcher uses an internal host-owned command registry for bundled providers,
+including app search and the calculator. Qualified command IDs identify the
+feature plugin and its command; query routing, recall, result limits and query
+presentation use those registrations. The host also owns the default command,
+the empty-query Space route and keyword ownership.
 Conflicting configured aliases are reported without replacing another command's
 trigger. This replaces the fixed search-mode table; it is not an external plugin
 installation API or a capability grant.
@@ -64,17 +71,18 @@ must be identified as trusted in-process code. Their isolation properties are no
 equivalent to a restricted guest. The public contract must not depend on native
 Rust ABI or arbitrary dynamic-library loading.
 
-Transitional bundled plugins also receive broker handles rather than direct OS
-services. This is a trusted-code boundary, not a sandbox against malicious native
-code. Migration ends only when the shell has no feature-specific modes, result
-kinds or payload fields and feature code has no direct OS access outside the
-broker. Upgrade migration explicitly records the enabled state and per-plugin
-grants for previously available app/file/dictionary operations. Settings shows
-these migrated grants and lets the user revoke them; global OS consent alone
-does not create a grant. New permission-dependent capabilities and user-installed
-plugins start disabled. Bundled permission-free plugins may be enabled by default,
-with their state visible in Settings; adding a privileged capability still needs
-an explicit grant.
+The target architecture gives each transitional bundled plugin a broker handle
+rather than direct OS services. This is a trusted-code boundary, not a sandbox
+against malicious native code. The calculator's copy action uses the broker;
+app, file and dictionary providers still access macOS directly. Migration ends
+only when the shell has no feature-specific modes, result kinds or payload fields
+and feature code has no direct OS access outside the broker. An upgrade migration
+must record the enabled state and per-plugin grants for previously available
+app/file/dictionary operations. Settings must show those grants and let the user
+revoke them; global OS consent alone must not create a grant. New permission-
+dependent capabilities and user-installed plugins start disabled. Bundled
+permission-free plugins may be enabled by default, with their state visible in
+Settings; adding a privileged capability still needs an explicit grant.
 
 ## Requests and results
 
@@ -99,18 +107,20 @@ and grant revocation invalidate pending completions as well as visible results.
 Guest code does not own the wall clock: host budgets and fuel enforce execution
 limits, with an explicit host import if an evaluator also needs cooperative checks.
 
-The [experimental query protocol](plugin-protocol.md) exercises bounded UTF-8
-messages, versions, correlation and per-request guest-memory ownership with a
-real calculator guest. Its runtime-independent Text/Detail/Pair view type is now
-shared by launcher items; its guest transport is not yet used by the launcher.
-Internal command registration and routes are implemented. External
-manifest/package registration, runtime integration, plugin grants, capability
-brokerage, guest execution cancellation/deadlines, guest action invocation and transport streaming
-still need implementation and review before external plugins run.
+The [query protocol](plugin-protocol.md) defines bounded UTF-8 messages, versions,
+correlation and per-request guest-memory ownership. The bundled calculator uses
+it through the shared Wasm runtime, and the runtime-independent Text/Detail/Pair
+views are rendered by the launcher. Internal command registration, query
+cancellation/deadlines and a brokered calculator copy action are implemented.
+External manifest/package registration, transport streaming, forms and support
+for additional guest operations remain future work.
 
-The [in-memory permission policy](plugin-permissions.md) implements separate
-plugin grants, OS consent and revocable operation permits. It is not yet wired
-to a broker or the launcher.
+The [permission policy](plugin-permissions.md) separates plugin grants, OS
+consent and revocable operation permits. Settings stores the calculator's
+enablement and clipboard grant; its copy action is checked by the broker before
+the host clipboard sink runs. Calendar consent is represented by the policy but
+is not connected to an OS prompt or calendar provider. The native app, file and
+dictionary providers still access macOS directly.
 
 ## Views, actions and saved state
 
@@ -164,11 +174,13 @@ grant access to Dupin globally; each plugin still needs its own grant.
 
 ## First implementation cases
 
-1. Calculator: local expressions and compound units, no permission request;
-   source/result card and copy action. Compare native and guest execution.
-2. Currency: expression parsing uses the calculator engine; rate data is read from
-   plugin storage and refreshed through constrained HTTP. Show the observation
-   date separately from fetch time. Cached rates remain usable offline.
+1. Calculator: the bundled Wasm plugin evaluates local expressions and compound
+   units without a permission request. It displays a source/result card and offers
+   copy after an explicit Settings grant. The current app-level runtime footprint
+   measurement is still an adoption gate.
+2. Currency: an offline guest exists as a runtime fixture only. A product plugin
+   still needs rate acquisition through constrained HTTP, namespaced persistent
+   storage, and separate observation/fetch times with a clear stale/offline state.
 3. Calendar: explicit enablement, permission on first invocation, bounded EventKit
    query through the broker, plugin-owned search/display and an external-open
    action. Tests use synthetic events and never request real permissions.
@@ -190,8 +202,9 @@ is exercised and reviewed.
 
 The host registry chooses an ordered list of default-query commands and optionally
 one pinned command. The pinned command contributes at most one row. Explicit
-keyword and Space routes invoke only their command. The default registration
-still invokes app search alone; this change ships no calculator or new Settings UI.
+keyword and Space routes invoke only their command. The default query invokes
+app search and the enabled calculator. Permission-dependent plugins remain off
+until granted in Settings.
 
 Each registered provider has one long-lived worker and one replaceable queued job.
 Native cancellation is cooperative: expiry invalidates the request and results,
@@ -212,5 +225,5 @@ limit. The active route's result limit also caps the combined list. Rune revisio
 timer, storing only the current generation's deadlines. Superseded and completed
 deadlines are inert. Failures use bounded host messages, separate from valid rows;
 fresh queries and dismissal clear them. These trusted native contracts provide
-neither guest isolation nor capability grants. Resource accounting, suspension,
-Settings controls and runtime enforcement remain future work.
+neither guest isolation nor capability grants. Resource accounting and suspension
+remain future work.

@@ -69,6 +69,54 @@ fn start(s: &mut Session, query: &str) -> u64 {
 }
 
 #[test]
+fn removing_a_provider_clears_its_rows_and_invalidates_callbacks_immediately() {
+    let mut s = Session::new(History::default(), registry(false)).unwrap();
+    let g = start(&mut s, "query");
+    s.deliver_from(id("slow.search"), batch(g, &["removed"]));
+    let key = s.result_key(0);
+    let mut next = registry(false);
+    next.set_default_providers(vec![id("apps.search")], None).unwrap();
+    let effects = s.set_commands(next).unwrap();
+    assert!(matches!(&effects[..], [Effect::Search { command, .. }] if command == &id("apps.search")));
+    assert!(s.items().is_empty());
+    assert!(!s.deliver_from(id("slow.search"), batch(g, &["late"])));
+    assert!(s.run_key_action(&key, "open").is_empty());
+}
+
+#[test]
+fn plugin_operations_keep_the_query_until_success_and_reject_stale_completion() {
+    let mut s = Session::new(History::default(), registry(false)).unwrap();
+    let g = start(&mut s, "query");
+    let mut result = item("answer");
+    let action = Action::Plugin {
+        command: id("apps.search"),
+        operation: dupin_plugin_protocol::Operation::CopyText { text: "42".into() },
+    };
+    result.primary = Some("copy-result".into());
+    result.actions = vec![ItemAction::new("copy-result", "Copy result", action.clone())];
+    s.deliver_from(
+        id("apps.search"),
+        Delivery::Batch {
+            generation: g,
+            items: vec![result],
+        },
+    );
+    let history = s.history().clone();
+    let key = s.result_key(0);
+    assert_eq!(s.intent(Intent::Open).unwrap(), vec![Effect::Run(action)]);
+    assert_eq!(s.query(), "query");
+    assert_eq!(s.history(), &history);
+    assert!(s.complete_operation(&key).contains(&Effect::Hide));
+    assert!(s.query().is_empty());
+    assert_ne!(s.history(), &history);
+    assert!(s.complete_operation(&key).is_empty());
+    let g = start(&mut s, "new query");
+    s.deliver_from(id("apps.search"), batch(g, &["other"]));
+    assert!(s.complete_operation(&key).is_empty());
+    assert_eq!(s.query(), "new query");
+}
+
+#[test]
 fn expiry_preserves_delivered_rows_and_rejects_late_updates() {
     let mut s = Session::new(History::default(), registry(false)).unwrap();
     let g = start(&mut s, "slow term");

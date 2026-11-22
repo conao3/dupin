@@ -1,0 +1,101 @@
+{
+	"metadata": {
+		"source": {
+			"head": "c4eb6dad773b949b7d7a778965c74e56b04f8ee1",
+			"dirty": false,
+			"tracked_files_dirty": false,
+			"status": ""
+		},
+		"pinned_flake": "git+file:///Users/ryoppippi/.t3/worktrees/dupin/t3-9cdb881b-3863c8fa8ee0ae96?rev=c4eb6dad773b949b7d7a778965c74e56b04f8ee1",
+		"system": "aarch64-darwin",
+		"nixpkgs": {
+			"lastModified": 1795217999,
+			"narHash": "sha256-Z5mAFcY8XTAaWe+RwTchz4Fx1gwaeQ2WD8A8bKX7njY=",
+			"owner": "NixOS",
+			"repo": "nixpkgs",
+			"rev": "680275f0bb6afce84fbac3e75fc47c5f2272400b",
+			"type": "github"
+		},
+		"toolchain": "rustc 1.99.1 (58cf8f9c3 2026-10-13) (built from a source tarball)\nbinary: rustc\ncommit-hash: 58cf8f9c35b355199727627d07ae34a4e2846d67\ncommit-date: 2026-10-13\nhost: aarch64-apple-darwin\nrelease: 1.99.1\nLLVM version: 23.1.3",
+		"macos": "ProductName:\t\tmacOS\nProductVersion:\t\t27.2.1\nBuildVersion:\t\t26B131",
+		"release_profile": "Workspace release profile with fat LTO and one codegen unit; stripped through the pinned Nix package rules.",
+		"runtime": "Wasmi 2.0.2; CompilationMode::Eager; std, validate and auto-dispatch; 16 MiB linear-memory limit; fuel enabled.",
+		"signing": "Ad-hoc; hardened runtime; no additional entitlements; no notary submission.",
+		"archive": "ditto ZIP with the app as the archive root, matching the updater packaging format.",
+		"script_sha256": "b5e2f277cb2b93103a011e16b448d2a9af1c710769c6d6e2a209d7aae2ca6cbb",
+		"unlink_store_sha256": "7be4242a9d568a2881f99917cd91a8c7dc29be7f25572b2a2890756e76d0f23d",
+		"limits": "Footprint only. No app launch, query latency, cancellation latency, peak memory, idle cost, or runtime adoption is measured.",
+		"minimum_guest": "Minimal ABI-v1 guest returning protocol-v2 empty results. The fixed reply correlates only with request_id=minimal-probe-1 and generation=1. The footprint script does not execute it.",
+		"currency_guest": "Offline currency fixture included only to measure a second realistic guest; it is not registered or shipped as a product feature.",
+		"nix_outputs": {
+			"native_only": "/nix/store/0w3080kf2paaqrma55xppj8dsa76cr5a-dupin-0.1.0",
+			"integrated": "/nix/store/w5i8xy3kjkqvap5a5ya42ffnn4iwxr8m-dupin-0.1.0",
+			"calculator_plugin": "/nix/store/qk35lrwbp58j4q546sd1cvnrv6v8amck-dupin-calculator-0.0.0",
+			"currency_fixture": "/nix/store/y1xcgcdj6vm7q5gpljrld7wm8zgzgp06-dupin-currency-guest-0.0.0",
+			"minimal_plugin": "/nix/store/val0zvd8l9a5afypldmafl4m553hpy9r-dupin-minimal-plugin"
+		},
+		"guests": {
+			"minimal": {
+				"bytes": 324,
+				"sha256": "84dba577987b71848b7fbf42189c6afb30ba0d69c00e05002899de84eac9f635"
+			},
+			"calculator": {
+				"bytes": 883691,
+				"sha256": "2b26bf364f445ae76241c4e9e561afb78edea696293b2cd28a7dd751c6a66120"
+			},
+			"currency_fixture": {
+				"bytes": 867792,
+				"sha256": "b8fa8278493fee62f8396fcda531e76052e47bba0b2a3d2ad1b810aa62cd5f0c"
+			}
+		}
+	},
+	"measurements": [
+		{
+			"label": "native-only",
+			"raw_executable_bytes": 18553696,
+			"signed_executable_bytes": 18445968,
+			"signed_app_file_bytes": 18588005,
+			"zip_bytes": 9631779,
+			"app": "artifacts/native-only.app"
+		},
+		{
+			"label": "runtime-no-guests",
+			"raw_executable_bytes": 19845568,
+			"signed_executable_bytes": 19730320,
+			"signed_app_file_bytes": 19872357,
+			"zip_bytes": 10104971,
+			"app": "artifacts/runtime-no-guests.app"
+		},
+		{
+			"label": "runtime-minimal-guest",
+			"raw_executable_bytes": 19845568,
+			"signed_executable_bytes": 19730320,
+			"signed_app_file_bytes": 19872927,
+			"zip_bytes": 10106579,
+			"app": "artifacts/runtime-minimal-guest.app"
+		},
+		{
+			"label": "runtime-calculator",
+			"raw_executable_bytes": 19845568,
+			"signed_executable_bytes": 19730320,
+			"signed_app_file_bytes": 20756300,
+			"zip_bytes": 10411745,
+			"app": "artifacts/runtime-calculator.app"
+		},
+		{
+			"label": "runtime-calculator-currency",
+			"raw_executable_bytes": 19845568,
+			"signed_executable_bytes": 19730320,
+			"signed_app_file_bytes": 21624356,
+			"zip_bytes": 10714973,
+			"app": "artifacts/runtime-calculator-currency.app"
+		}
+	],
+	"notes": [
+		"runtime-no-guests is the actual integrated host with plugin resources removed after the Nix build.",
+		"The four runtime variants use the same integrated executable; only bundled guest resources differ.",
+		"The minimal guest is an ABI and protocol fixture; the footprint script bundles it but does not execute it.",
+		"runtime-calculator-currency bundles two realistic guests for footprint accounting, but does not register the currency command.",
+		"App bytes sum regular files; ZIP bytes include the signed app directory and ZIP metadata."
+	]
+}

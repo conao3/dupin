@@ -1,0 +1,9 @@
+{
+	"version": 2,
+	"request_id": "incomplete-1",
+	"generation": "1",
+	"command": "calculator",
+	"query": "30*(60+1",
+	"limit": 1,
+	"state": null
+}

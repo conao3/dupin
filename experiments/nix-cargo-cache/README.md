@@ -15,6 +15,13 @@ the executable-size comparison independent of Nix's build-directory names.
 
 Run the comparison from the repository with committed changes:
 
+This harness compares the pre-calculator builders at the pinned revisions in
+the records below. Re-run those revisions to reproduce the historical result.
+It does not yet support the later Wasm resource wrapper: compiler inputs now
+belong to `dupin.baseline.nativeApplication`, and both compared revisions must
+enable the same runtime features. Extending that comparison remains part of #95;
+do not interpret a feature-changing comparison as a cache measurement.
+
 ```sh
 nix build --inputs-from . nixpkgs#rust-audit-info --out-link /tmp/dupin-rust-audit-info
 nu experiments/nix-cargo-cache/measure.nu /tmp/dupin-rust-audit-info/bin/rust-audit-info \

@@ -1,0 +1,200 @@
+{
+	"metadata": {
+		"source_commit": "3ca4203f08c1885afb4c207be4adbc91eb9a4f0d",
+		"toolchain": "rustc 1.99.1 (58cf8f9c3 2026-10-13) (built from a source tarball)\nbinary: rustc\ncommit-hash: 58cf8f9c35b355199727627d07ae34a4e2846d67\ncommit-date: 2026-10-13\nhost: aarch64-apple-darwin\nrelease: 1.99.1\nLLVM version: 23.1.3",
+		"macos": "ProductName:\t\tmacOS\nProductVersion:\t\t27.2.1\nBuildVersion:\t\t26B131",
+		"nixpkgs": {
+			"lastModified": 1795217999,
+			"narHash": "sha256-Z5mAFcY8XTAaWe+RwTchz4Fx1gwaeQ2WD8A8bKX7njY=",
+			"owner": "NixOS",
+			"repo": "nixpkgs",
+			"rev": "680275f0bb6afce84fbac3e75fc47c5f2272400b",
+			"type": "github"
+		},
+		"guest_modules": {
+			"minimal": {
+				"bytes": 324,
+				"sha256": "84dba577987b71848b7fbf42189c6afb30ba0d69c00e05002899de84eac9f635"
+			},
+			"calculator": {
+				"bytes": 883703,
+				"sha256": "ad2027c1c5648743cf759c1fcb545397751b95a6aac9ecfe1bd8698b5d8fb822"
+			},
+			"currency_fixture": {
+				"bytes": 867856,
+				"sha256": "b72314b8e853abdb2015cf1364e81e2691bc84e8f6b657463995649feea3b2c2"
+			}
+		},
+		"source_hashes": {
+			"probe": "d47fea0dbdbd96a3984434b93cf68705d874a3dc48e68c1a47d4c93543b9ace5",
+			"lock": "c08184c1cfb7ae15abb0461ca9b8b847902353dddf06240bf454c467ca3c41ce",
+			"runtime": "7a7cfff8f1d31bfa49c9be2b9c33700fcc959713da690960f99e143486cb200a",
+			"protocol": "e2e4f2e2f1044114de9f6d3df702c521c2a8bc4bdf410ad27a014286920372c8",
+			"calculator": "6b7b46f8c0aaf2bd73750531d27b8b2c3cf65a4aede2e510e52be8b870b078c7",
+			"currency_fixture": "df0c2105a4443b016ae5d3ae4b39ae3f45f50b1f731796f7bbcce3e95cb1111e"
+		}
+	},
+	"result": {
+		"limits": {
+			"cancellation_checks": 11,
+			"cancellation_during_query_verified": true,
+			"cancellation_latency_ns": 57458,
+			"fuel_exhaustion_ns": 2019458,
+			"fuel_exhaustion_verified": true,
+			"pathological_query_fuel_limit": 20000000
+		},
+		"minimal_abi_guest": {
+			"first_query_for_module": true,
+			"first_query_ns": 6416,
+			"module_load_ns": 33042,
+			"valid_empty_protocol_response": true,
+			"wasm_bytes": 324
+		},
+		"modules": {
+			"calculator": {
+				"module_load_ns": 13393708,
+				"queries": [
+					{
+						"measurement_boundary": "Request.encode -> plugin handle -> Response.decode",
+						"native": {
+							"backend": "native_plugin",
+							"command": "calculator",
+							"first_query_for_backend": true,
+							"first_query_ns": 356792,
+							"iterations": 20,
+							"query": "30*(60+1)",
+							"warm_query_median_ns": 15500,
+							"warm_query_p95_ns": 20042
+						},
+						"responses_match": true,
+						"wasm": {
+							"backend": "shared_wasm_runtime",
+							"command": "calculator",
+							"first_query_for_backend": true,
+							"first_query_ns": 793500,
+							"iterations": 20,
+							"query": "30*(60+1)",
+							"warm_query_median_ns": 303625,
+							"warm_query_p95_ns": 343291
+						}
+					},
+					{
+						"measurement_boundary": "Request.encode -> plugin handle -> Response.decode",
+						"native": {
+							"backend": "native_plugin",
+							"command": "calculator",
+							"first_query_for_backend": false,
+							"first_query_ns": 196708,
+							"iterations": 20,
+							"query": "560km to mi",
+							"warm_query_median_ns": 71000,
+							"warm_query_p95_ns": 78917
+						},
+						"responses_match": true,
+						"wasm": {
+							"backend": "shared_wasm_runtime",
+							"command": "calculator",
+							"first_query_for_backend": false,
+							"first_query_ns": 1485709,
+							"iterations": 20,
+							"query": "560km to mi",
+							"warm_query_median_ns": 1267000,
+							"warm_query_p95_ns": 1415125
+						}
+					},
+					{
+						"measurement_boundary": "Request.encode -> plugin handle -> Response.decode",
+						"native": {
+							"backend": "native_plugin",
+							"command": "calculator",
+							"first_query_for_backend": false,
+							"first_query_ns": 27500,
+							"iterations": 20,
+							"query": "100 f in c",
+							"warm_query_median_ns": 18916,
+							"warm_query_p95_ns": 23875
+						},
+						"responses_match": true,
+						"wasm": {
+							"backend": "shared_wasm_runtime",
+							"command": "calculator",
+							"first_query_for_backend": false,
+							"first_query_ns": 423458,
+							"iterations": 20,
+							"query": "100 f in c",
+							"warm_query_median_ns": 416917,
+							"warm_query_p95_ns": 425625
+						}
+					},
+					{
+						"measurement_boundary": "Request.encode -> plugin handle -> Response.decode",
+						"native": {
+							"backend": "native_plugin",
+							"command": "calculator",
+							"first_query_for_backend": false,
+							"first_query_ns": 76666,
+							"iterations": 20,
+							"query": "30*(60+1)km/h in m/s",
+							"warm_query_median_ns": 42417,
+							"warm_query_p95_ns": 50833
+						},
+						"responses_match": true,
+						"wasm": {
+							"backend": "shared_wasm_runtime",
+							"command": "calculator",
+							"first_query_for_backend": false,
+							"first_query_ns": 835167,
+							"iterations": 20,
+							"query": "30*(60+1)km/h in m/s",
+							"warm_query_median_ns": 829875,
+							"warm_query_p95_ns": 871917
+						}
+					}
+				],
+				"wasm_bytes": 883703
+			},
+			"currency_fixture": {
+				"module_load_ns": 10049000,
+				"note": "offline synthetic rates; fixture guest is not registered in Dupin",
+				"query": {
+					"measurement_boundary": "Request.encode -> plugin handle -> Response.decode",
+					"native": {
+						"backend": "native_plugin",
+						"command": "currency",
+						"first_query_for_backend": true,
+						"first_query_ns": 137167,
+						"iterations": 20,
+						"query": "30*(60+1) usd in jpy",
+						"warm_query_median_ns": 37208,
+						"warm_query_p95_ns": 43792
+					},
+					"responses_match": true,
+					"wasm": {
+						"backend": "shared_wasm_runtime",
+						"command": "currency",
+						"first_query_for_backend": true,
+						"first_query_ns": 726833,
+						"iterations": 20,
+						"query": "30*(60+1) usd in jpy",
+						"warm_query_median_ns": 664834,
+						"warm_query_p95_ns": 714750
+					}
+				},
+				"wasm_bytes": 867856
+			}
+		},
+		"runtime": {
+			"compilation_mode": "Eager",
+			"crate": "dupin-plugin-runtime",
+			"first_query_measurement": "first sample for each workload; first_query_for_backend identifies first workload query to that backend",
+			"iterations_per_query": 20,
+			"max_module_bytes": 4194304,
+			"memory_limit_bytes": 16777216,
+			"native_comparison": "same standalone process, current native plugin libraries and shared Wasm runtime; same V2 request and response decoding",
+			"query_deadline_ms": 2000,
+			"query_fuel_limit": 20000000,
+			"store_per_query": true
+		},
+		"scope": "standalone runtime probe; excludes app startup, UI, OS services and process memory"
+	}
+}

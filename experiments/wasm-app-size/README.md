@@ -78,3 +78,84 @@ credentials. It does not reproduce Developer ID certificates, notary submission 
 stapling. ZIP metadata and signing can vary between runs. No DMG or memory/latency
 measurement is included here; the calculator experiment covers execution timing
 and limits separately. These results alone do not adopt a runtime.
+
+## Current integrated footprint gate
+
+`measure-integrated.nu` measures the app and guest layout used by the integrated
+plugin host. Run it from an Apple silicon Mac after committing the source being
+measured:
+
+```sh
+nu experiments/wasm-app-size/measure-integrated.nu --prepare-only
+nu experiments/wasm-app-size/measure-integrated.nu
+```
+
+The first command records the source state and toolchain metadata without
+building the app variants. A full run builds five Nix outputs from that exact
+Git revision, with GC roots inside its temporary directory, then signs and
+archives disposable app copies. It records the
+stripped executable size, signed executable size, total regular-file bytes in
+the signed app, and updater-format ZIP size for each case:
+
+- native app built with the Wasm runtime feature disabled;
+- the integrated runtime executable with its plugin resources removed;
+- that same executable with a minimal valid Wasm plugin resource;
+- the same executable with the calculator guest;
+- the same executable with both the calculator and offline currency fixture.
+
+Only the first two cases change the executable. The final three use the same
+integrated binary and vary its bundled resources. The minimal plugin exports the
+runtime ABI and returns a static protocol-v2 empty-results reply. Its only valid
+correlation is for a request with `request_id = "minimal-probe-1"` and
+`generation = "1"`; the fixture ignores the other request fields. The app-size
+script only bundles this resource and never launches or executes it. The
+currency fixture is included only to count a second realistic guest and is not
+registered as a product feature.
+
+The JSON records the source commit and dirty state, the script and packaging
+helper hashes, the root nixpkgs lock entry, Rust and macOS versions, Nix output
+paths, runtime settings, and each guest's size and SHA-256. The temporary
+directory is printed with the result; it contains `results.json`, signed apps,
+ZIPs, and the Nix GC roots. Removing it releases those roots.
+
+This gate measures package footprint only. It does not launch the app, execute
+the guest, benchmark queries, measure cancellation or memory, or prove runtime
+adoption. Ad-hoc signing checks hardened-runtime compatibility without
+additional entitlements, Developer ID signing, notarisation, or stapling.
+
+### Integrated run, 22 November 2026
+
+[Current recorded results](results/2026-11-22-integrated-cached-aarch64-darwin.json) use
+`3ca4203f08c1885afb4c207be4adbc91eb9a4f0d`, a clean source snapshot after
+the Cargo-cache integration. Sizes are bytes; app totals include regular files
+after signing. The [earlier run](results/2026-11-22-integrated-aarch64-darwin.json)
+remains as a historical record of its own pinned source.
+
+| Variant                                  | Stripped executable | Signed app | Updater ZIP |
+| ---------------------------------------- | ------------------: | ---------: | ----------: |
+| Native only                              |          18,603,456 | 18,637,477 |   9,683,804 |
+| Runtime, no guests                       |          19,878,816 | 19,905,413 |  10,152,819 |
+| Runtime, minimal ABI guest               |          19,878,816 | 19,905,983 |  10,154,428 |
+| Runtime and calculator                   |          19,878,816 | 20,789,368 |  10,459,601 |
+| Runtime, calculator and currency fixture |          19,878,816 | 21,657,488 |  10,762,846 |
+
+The calculator build adds 2,151,891 app bytes and 775,797 ZIP bytes
+against the same-source native-only build. Adding the second realistic guest
+adds another 868,120 app bytes and 303,245 ZIP bytes. Both guests contain their
+own evaluator and encoding code; the second-guest case counts that duplication
+rather than assuming a shared guest library.
+
+All signed variants passed strict verification with hardened runtime and no
+additional entitlements. The record retains the temporary app paths; the app
+and ZIP files themselves are not committed.
+
+The [current execution probe](../integrated-runtime-probe/README.md) checks these
+exact packaged guests against their native implementations. Package size and
+query evidence do not complete adoption: paired app startup and idle-memory
+measurements remain outstanding.
+
+The [remapped-guest rerun](results/2026-11-22-integrated-remapped-aarch64-darwin.json)
+records the same five package variants after removing temporary vendor paths
+from both standalone guests. Both guest packages passed a repeated Nix build
+with identical bytes. The earlier records retain their original source and
+artifact hashes.

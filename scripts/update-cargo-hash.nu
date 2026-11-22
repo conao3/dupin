@@ -1,12 +1,20 @@
 #!/usr/bin/env nu
 
-# Refresh the vendored-dependency hash in package.nix after Cargo.lock changes.
+# Refresh a package's vendored-dependency hash after its Cargo.lock changes.
 #
 # nix-update evaluates the flake from its store path, which Nix's lazy trees don't create
 # until something asks for it, so archive the flake first.
-def main []: nothing -> nothing {
+def main [package: string = "default", --file: path]: nothing -> nothing {
+    let flags = if $file == null {
+        []
+    } else {
+        [
+            --override-filename
+            ($file | path expand)
+        ]
+    }
     cd ($env.FILE_PWD | path dirname)
     nix flake archive --json | from json | ignore
-    # The baseline owns the vendor hash and complete Cargo source tree.
-    nix-update --flake --version=skip default.baseline
+    let attribute = if $package == "default" { "default.baseline" } else { $package }
+    nix-update --flake --version=skip ...$flags $attribute
 }

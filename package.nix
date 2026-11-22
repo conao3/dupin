@@ -4,6 +4,9 @@
   resvg,
   python3Packages,
   inter,
+  stdenvNoCC,
+  calculatorPlugin,
+  withWasm ? true,
 }:
 let
   root = ./.;
@@ -48,7 +51,7 @@ let
   cargoDeps = rustPlatform.fetchCargoVendor {
     inherit src;
     name = "dupin-vendor-${builtins.substring 0 16 (builtins.hashFile "sha256" (root + /Cargo.lock))}";
-    hash = "sha256-+cYFSnE4CLOuMlSmX04mZC9Bgz4G9yZrLtyNsoWyFa8=";
+    hash = "sha256-g452aqEXYNXiRK2LB54KmQ0k3GXCPXxMbKliY3j38C0=";
   };
 
   # What every Rust derivation of the workspace shares (the package here, clippy and the
@@ -106,24 +109,58 @@ let
       platforms = [ "aarch64-darwin" ];
     };
   };
-in
-rustPlatform.buildRustPackage (
-  commonArgs
-  // packagingArgs
-  // {
-    cargoBuildFlags = [
-      "--package"
-      "dupin"
-    ];
-    # Tests run in the lint-and-test check, in debug as cargo runs them.
-    doCheck = false;
-    passthru = {
-      inherit
-        commonArgs
-        packagingArgs
-        cargoSrc
-        bundleSrc
-        ;
+  nativeApplication = rustPlatform.buildRustPackage (
+    commonArgs
+    // packagingArgs
+    // {
+      cargoBuildFlags = [
+        "--package"
+        "dupin"
+      ]
+      ++ lib.optional (!withWasm) "--no-default-features";
+      # Tests run in the lint-and-test check, in debug as cargo runs them.
+      doCheck = false;
+      passthru = {
+        inherit
+          commonArgs
+          packagingArgs
+          cargoSrc
+          bundleSrc
+          ;
+      };
+    }
+  );
+  wrapApplication =
+    application:
+    stdenvNoCC.mkDerivation {
+      pname = "dupin";
+      inherit version;
+      dontUnpack = true;
+      dontBuild = true;
+      dontFixup = true;
+      installPhase = ''
+        mkdir -p $out/Applications $out/bin
+        cp -R ${application}/Applications/Dupin.app $out/Applications/Dupin.app
+        chmod -R u+w $out/Applications/Dupin.app
+        ${lib.optionalString withWasm ''
+          mkdir -p $out/Applications/Dupin.app/Contents/Resources/plugins
+          cp ${calculatorPlugin}/share/dupin/plugins/calculator.wasm $out/Applications/Dupin.app/Contents/Resources/plugins/calculator.wasm
+        ''}
+        ln -s $out/Applications/Dupin.app/Contents/MacOS/dupin $out/bin/dupin
+      '';
+      passthru = application.passthru // {
+        inherit
+          commonArgs
+          cargoDeps
+          packagingArgs
+          cargoSrc
+          bundleSrc
+          wrapApplication
+          withWasm
+          ;
+        nativeApplication = application;
+      };
+      inherit (application) meta;
     };
-  }
-)
+in
+wrapApplication nativeApplication
