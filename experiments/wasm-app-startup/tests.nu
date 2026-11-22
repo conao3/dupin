@@ -1,6 +1,6 @@
 #!/usr/bin/env nu
 
-use ./measure.nu [config-text parse-ready-line variant-order]
+use ./measure.nu [config-text parse-ready-line ready-marker-text variant-order]
 
 def main []: nothing -> nothing {
     let config = config-text | from toml
@@ -15,6 +15,14 @@ def main []: nothing -> nothing {
     let marker = parse-ready-line 'dupin-trace: ready pid=42 startup_ms=123.456'
     if $marker.pid != 42 or $marker.startup_ms != 123.456 {
         error make {msg: 'readiness marker parsing changed'}
+    }
+    for partial in ['dupin-trace: ready pid=', 'dupin-trace: ready pid=42 startup_ms=123.456'] {
+        if (ready-marker-text $partial) != null {
+            error make {msg: 'readiness must wait for a complete line'}
+        }
+    }
+    if (ready-marker-text "another trace\ndupin-trace: ready pid=42 startup_ms=123.456\n") != $marker {
+        error make {msg: 'completed readiness marker was not found'}
     }
     let rejects_invalid = try {
         parse-ready-line 'dupin-trace: ready pid=not-a-pid startup_ms=0.000'
