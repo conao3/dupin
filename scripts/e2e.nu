@@ -1,7 +1,8 @@
 #!/usr/bin/env nix
 #! nix shell --inputs-from .. nixpkgs#nushell --command nu
 # Drive a built Dupin.app through its accessibility tree with agent-desktop:
-# hotkey → panel → type "calculator" → ↩ → Calculator is running.
+# hotkey → panel → type "calculator" → ↩ → Calculator is running, then Settings' pages. The
+# panel draws the built-in backdrop shader, so the screenshots show it.
 # Snapshots hold whatever the panel lists, so run this only on a disposable machine.
 
 # Run the scenario against `app`, keeping each step's last agent-desktop reply, a snapshot and a
@@ -28,7 +29,7 @@ def "main run" [app: path, --out: path = 'target/e2e'] {
     # Spotlight holds ⌘Space on a fresh macOS.
     let config = $out | path join config
     mkdir ($config | path join dupin)
-    'hotkey = "alt+space"' | save --force ($config | path join dupin config.toml)
+    "hotkey = \"alt+space\"\nbackdrop = \"flow\"\n" | save --force ($config | path join dupin config.toml)
     let log = $out | path join dupin.log
     let dupin = job spawn {
         with-env {XDG_CONFIG_HOME: $config, DUPIN_TRACE: '1'} {
@@ -43,6 +44,8 @@ def "main run" [app: path, --out: path = 'target/e2e'] {
     ad $out press-hotkey press alt+space | ignore
     let focused = {|r| $r.ok and 'focused' in ($r.data?.match?.states? | default []) }
     poll $out field $focused find --app Dupin --role textfield --first
+    # Past the backdrop's fade-in, so the screenshot shows the shader.
+    sleep 500ms
     snap $out summoned
 
     # `type` needs a settable AX value or the main window, and the field has neither: the
@@ -71,8 +74,82 @@ def "main run" [app: path, --out: path = 'target/e2e'] {
     poll --tries 15 $out opened {|r| $r.ok and (mentions $r Calculator) } list-apps
     snap $out opened
 
+    # Calculator can still be coming forward; summoned before then, the panel would lose focus
+    # to it and hide before ⌘, arrives.
+    wait-frontmost Calculator
+    ad $out press-hotkey-again press alt+space | ignore
+    poll $out field-again $focused find --app Dupin --role textfield --first
+    ^osascript -e 'tell application "System Events" to keystroke "," using command down'
+    let page = {|r| $r.ok and $r.data?.match?.ref_id? != null }
+    let appearance = (poll
+        $out
+        settings
+        $page
+        find
+        --app
+        Dupin
+        --name
+        Appearance
+        --exact
+        --first
+    )
+    # Settings comes to the front over Calculator, though Dupin, an accessory app, doesn't become
+    # the active app, so wait for the window rather than for Dupin to be frontmost.
+    let settings = {|r| $r.ok and (mentions $r 'Dupin Settings') }
+    poll $out settings-window $settings list-windows --app Dupin
+    snap $out settings-general
+    # Each page in the sidebar in turn: a ref from before a click goes stale once the page
+    # changes, so find the next one afresh.
+    let search = poll $out search $page find --app Dupin --name Search --exact --first
+    ad $out open-search click $search.data.match.ref_id | ignore
+    (poll
+        $out
+        search-page
+        $found
+        find
+        --app
+        Dupin
+        --name
+        'Files shown'
+        --exact
+        --first
+    )
+    snap $out settings-search
+    let appearance = (poll
+        $out
+        appearance
+        $page
+        find
+        --app
+        Dupin
+        --name
+        Appearance
+        --exact
+        --first
+    )
+    ad $out open-appearance click $appearance.data.match.ref_id | ignore
+    (poll
+        $out
+        appearance-page
+        $found
+        find
+        --app
+        Dupin
+        --name
+        Backdrop
+        --exact
+        --first
+    )
+    poll $out settings-window-again $settings list-windows --app Dupin
+    snap $out settings-appearance
+
     job kill $dupin
-    print 'e2e: the panel opened Calculator'
+    # A shader that fails falls back to the built-in one with a warning, which the
+    # screenshots alone wouldn't show.
+    if (open --raw $log | lines | any {|line| $line =~ '^dupin: backdrop (shader|pipeline)' }) {
+        error make {msg: $"the backdrop shader failed; see ($log)"}
+    }
+    print 'e2e: the panel opened Calculator, and Settings showed its pages'
 }
 
 # Run agent-desktop, keep its reply in <out>/<name>.json, and return it parsed.
@@ -118,7 +195,27 @@ def mentions [reply: record, name: string]: nothing -> bool {
 
 def snap [out: path, name: string] {
     ad $out $'($name)-snapshot' snapshot --app Dupin | ignore
-    ^screencapture -x ($out | path join $'($name).png') | complete | ignore
+    let shot = ^screencapture -x ($out | path join $'($name).png') | complete
+    if $shot.exit_code != 0 {
+        error make {msg: $"screencapture failed for ($name): ($shot.stderr)"}
+    }
+}
+
+# Wait until `app` is the frontmost application, so a screenshot shows its window.
+def wait-frontmost [app: string, --tries: int = 20] {
+    let script = 'tell application "System Events" to get name of first application process whose frontmost is true'
+    mut front = ''
+    for attempt in 1..$tries {
+        $front = (
+            ^osascript -e $script
+            | complete
+            | get stdout
+            | str trim
+        )
+        if ($front | str lowercase) == ($app | str lowercase) { return }
+        sleep 500ms
+    }
+    error make {msg: $"timed out waiting for ($app) to be frontmost; ($front) is"}
 }
 
 def main [] {
