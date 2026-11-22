@@ -2,7 +2,7 @@ use std::collections::HashMap;
 #[cfg(feature = "wasm-runtime")]
 use std::io::Read;
 #[cfg(feature = "wasm-runtime")]
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
@@ -412,19 +412,54 @@ fn module_path(plugin: &Descriptor, guest: &Guest) -> Option<PathBuf> {
                 .join(format!("dupin_{}.wasm", plugin.id)),
         );
     }
+    bundled_module_path(&std::env::current_exe().ok()?, guest.module)
+}
+
+#[cfg(feature = "wasm-runtime")]
+fn bundled_module_path(executable: &Path, module: &str) -> Option<PathBuf> {
+    let executable = std::fs::canonicalize(executable).ok()?;
     Some(
-        std::env::current_exe()
-            .ok()?
+        executable
             .parent()?
             .parent()?
             .join("Resources/plugins")
-            .join(guest.module),
+            .join(module),
     )
 }
 
 #[cfg(all(test, feature = "wasm-runtime"))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bundled_modules_resolve_from_the_app_and_the_nix_bin_symlink() {
+        let root = std::env::temp_dir().join(format!(
+            "dupin-plugin-path-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&root).unwrap();
+        let root = std::fs::canonicalize(root).unwrap();
+        let contents = root.join("Applications/Dupin.app/Contents");
+        let executable = contents.join("MacOS/dupin");
+        let module = contents.join("Resources/plugins/calculator.wasm");
+        let alias = root.join("bin/dupin");
+        std::fs::create_dir_all(executable.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(module.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(alias.parent().unwrap()).unwrap();
+        std::fs::write(&executable, b"fixture").unwrap();
+        std::fs::write(&module, b"fixture").unwrap();
+        std::os::unix::fs::symlink("../Applications/Dupin.app/Contents/MacOS/dupin", &alias).unwrap();
+        let expected = std::fs::canonicalize(&module).unwrap();
+        let direct = bundled_module_path(&executable, "calculator.wasm");
+        let through_alias = bundled_module_path(&alias, "calculator.wasm");
+        std::fs::remove_dir_all(&root).unwrap();
+        assert_eq!(direct, Some(expected.clone()));
+        assert_eq!(through_alias, Some(expected));
+    }
 
     #[test]
     fn copying_requires_an_explicit_grant_and_enablement() {
