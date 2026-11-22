@@ -151,6 +151,7 @@ impl Session {
             return Err(crate::CommandError::ActiveCommandRemoved(self.command.clone()));
         }
         let previous = self.provider_ids();
+        let previous_spec = self.command().clone();
         let pin = self.commands.pinned().cloned();
         self.commands = commands;
         if self.provider_ids() != previous || self.commands.pinned() != pin.as_ref() {
@@ -162,6 +163,9 @@ impl Session {
             } else {
                 effects
             });
+        }
+        if self.command() != &previous_spec {
+            return Ok(self.refresh());
         }
         Ok(Vec::new())
     }

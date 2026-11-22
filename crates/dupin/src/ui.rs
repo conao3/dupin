@@ -235,7 +235,6 @@ impl Ui {
     }
 
     pub fn apply_config(&mut self, config: &Config, tx: &mut Tx) {
-        let previous_limit = self.session.command().result_limit;
         self.plugins.apply_config(config);
         let ranking_changed = {
             let mut rules = self.file_demotions.write().unwrap();
@@ -259,8 +258,7 @@ impl Ui {
             .expect("built-in command registration is valid");
         self.apply(effects, tx);
         self.registration_notice = registration.notice;
-        if self.session.command().result_limit != previous_limit
-            || (web_changed && self.session.command_id().as_str() == crate::commands::APPS)
+        if (web_changed && self.session.command_id().as_str() == crate::commands::APPS)
             || (ranking_changed && self.session.command_id().as_str() == crate::commands::FILES)
         {
             let effects = self.session.refresh();

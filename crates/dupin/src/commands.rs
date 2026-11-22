@@ -501,6 +501,59 @@ mod tests {
     }
 
     #[test]
+    fn keyword_plugin_enablement_restarts_the_active_query_and_rejects_old_rows() {
+        use dupin_core::{Delivery, Effect, History, Item, Session};
+        let mut config = Config::default();
+        let mut session = Session::new(History::default(), configured(&config).unwrap().registry).unwrap();
+        session.set_query("define term");
+        for enabled in [true, false] {
+            config.plugins.insert(
+                "dictionary".into(),
+                dupin_core::config::PluginSettings {
+                    enabled,
+                    grants: vec![],
+                },
+            );
+            let effects = session
+                .set_commands(configured(&config).unwrap().registry)
+                .unwrap();
+            let generation = effects
+                .iter()
+                .find_map(|effect| match effect {
+                    Effect::Search {
+                        command,
+                        generation,
+                        query,
+                    } if command == &id(DICTIONARY) && query == "term" => Some(*generation),
+                    _ => None,
+                })
+                .expect("enablement changes restart the active keyword query");
+            assert!(matches!(
+                session.results(),
+                dupin_core::session::Results::Searching { replaced: false }
+            ));
+            assert_eq!(session.query(), "term");
+            assert!(!session.deliver_from(
+                id(DICTIONARY),
+                Delivery::Batch {
+                    generation: generation - 1,
+                    items: vec![Item::path("stale".into(), "stale".into(), vec![])],
+                }
+            ));
+            if enabled {
+                session.deliver_from(
+                    id(DICTIONARY),
+                    Delivery::Batch {
+                        generation,
+                        items: vec![Item::path("definition".into(), "term".into(), vec![])],
+                    },
+                );
+                assert_eq!(session.items().len(), 1);
+            }
+        }
+    }
+
+    #[test]
     fn invalid_dictionary_keywords_are_skipped_with_a_notice() {
         let config = Config {
             dictionary_keywords: vec!["in".into(), "".into(), "look up".into()],
