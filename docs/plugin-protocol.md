@@ -34,10 +34,11 @@ selection of an action to the host menu.
 Actions contain an ID, title and a typed `operation`. The only current operation
 is `copy_text`, with a non-empty bounded `text` value. No executable code, native
 UI objects or arbitrary OS operations are accepted. The host must check the
-plugin's declared and granted clipboard-write capability at invocation time;
-displaying the action or pressing Enter does not create a grant. Protocol
+plugin's enablement, declared clipboard-write capability and visible-action
+revocations at invocation time. The launcher derives the action label from the
+operation and ignores the guest's title. Protocol
 validation alone never executes an operation. The calculator declares a primary
-copy action. In the launcher, the broker rechecks its grant and current result
+copy action. In the launcher, the broker rechecks its permit and current result
 before the host clipboard sink runs. The fixture CLI prints the action data and
 does not dispatch it.
 

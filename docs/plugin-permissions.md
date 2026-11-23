@@ -3,7 +3,7 @@
 `dupin-plugin-policy` is a host-owned, in-memory policy component for #12 and #96.
 The bundled Wasm calculator uses it through `dupin-plugin-broker` for its Copy
 result action, and Settings persists and edits that plugin's enablement and
-clipboard grant. The policy crate itself performs no OS operations. App, file and
+visible-action opt-outs. The policy crate itself performs no OS operations. App, file and
 dictionary providers remain trusted native code that accesses macOS directly;
 they are not yet migrated to this broker. This is a permission boundary for the
 wired action, not a sandbox for native code or a complete policy system for all
@@ -12,8 +12,9 @@ plugins.
 Each installation receives an opaque handle belonging to one policy instance.
 The host's installation registry owns its association with a public plugin ID;
 the guest cannot supply a handle. New installations start disabled with declared
-capabilities but no grants. Enablement and per-capability grants are separate
-explicit operations. Neither requests OS access.
+capabilities. The host computes access from fixed capability tiers: Visible
+actions are allowed while enabled unless revoked; Data and Privileged capabilities
+need explicit grants. Neither enabling a plugin nor changing these settings requests OS access.
 
 The policy defines clipboard write and calendar read. The calculator currently
 uses clipboard write; the policy also tracks calendar consent, but no provider or
@@ -25,7 +26,8 @@ The broker must call `access` for an actual operation. Calendar read can return
 `NeedsOsConsent` only after enablement, declaration and a plugin grant. Denied and
 restricted OS states return distinct decisions rather than another prompt request.
 The host supplies OS consent status; global consent never grants another plugin
-access. Clipboard write requires a plugin grant but has no calendar consent gate.
+access. Clipboard write is Visible and has no calendar consent gate. It can be
+turned off individually even while calculation remains enabled.
 
 An allowed operation receives an opaque permit. Before releasing an asynchronous
 completion or performing its effect, the broker must call `validate` with the
@@ -36,8 +38,10 @@ cannot undo an effect already performed by the OS.
 Revocation invalidates outstanding permits for that capability. Disabling
 invalidates every permit for the plugin. Re-enabling or granting access again does
 not revive old permits. Removed declarations lose their grants; adding them again
-requires a new grant. Updates retain grants and permits for unchanged capabilities
-while additions start ungranted. OS consent changes invalidate calendar permits.
+requires a new permit. Updates retain access for unchanged capabilities. New Data
+and Privileged capabilities start ungranted; new bundled Visible actions are
+allowed unless revoked. A future third-party installer must re-disclose new
+Visible actions. OS consent changes invalidate calendar permits.
 Uninstalling invalidates the handle permanently, including after reinstalling the
 same public plugin ID. Another policy instance cannot accept its handles or permits.
 
@@ -47,8 +51,13 @@ prepared copy once after rechecking its permit and a host-supplied current-query
 predicate. The launcher supplies the platform clipboard sink only after these
 checks. Both the predicate and sink belong to the trusted host, never the guest.
 
-The calculator's enabled state and grants are stored in `config.toml`; Settings
-edits them without prompting macOS. Other plugins' migration and persistence,
+The calculator's enabled state and opt-outs are stored in `config.toml`.
+`grants` records explicit Data/Privileged allows; `revoked` records Visible
+opt-outs. An id in the wrong list is ignored and preserved, including legacy
+`grants = ["clipboard-write"]`. The earlier development format recorded only
+positive grants, so an absent clipboard grant cannot distinguish never granting
+from turning it off. That unreleased format has no refusal history to migrate.
+Settings edits only the chosen id without prompting macOS. Other plugins' migration and persistence,
 calendar prompt coordination, additional broker operations and a full lifecycle
 for installed plugins remain future work. Tests use synthetic policy state and
 never request or change OS permissions.

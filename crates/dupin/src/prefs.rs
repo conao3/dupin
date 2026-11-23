@@ -711,29 +711,34 @@ fn plugins(s: &Prefs, k: &Kit) -> Vec<El> {
             enabled,
         ));
         for capability in plugin.capabilities {
-            let granted = current.grants.iter().any(|id| id == capability.id);
+            let granted = capability.allowed(&current);
+            let label = crate::plugins::capability_label(capability.kind);
+            let description = match capability.kind.tier() {
+                dupin_plugin_policy::Tier::Visible => format!("Allowed while {} is on", plugin.title),
+                _ if granted => "Allowed".into(),
+                _ => "Needs your permission".into(),
+            };
             let grant = Switch::new(granted)
-                .label(capability.title)
+                .label(label)
                 .hide_label()
                 .disabled(s.read_only || !current.enabled)
                 .on_toggle(move |s: &mut Prefs| {
                     s.set(|config| {
                         let mut settings = crate::plugins::settings(config, plugin);
-                        settings.grants.retain(|id| id != capability.id);
-                        if !granted {
-                            settings.grants.push(capability.id.into());
+                        let ids = match capability.kind.tier() {
+                            dupin_plugin_policy::Tier::Visible => &mut settings.revoked,
+                            _ => &mut settings.grants,
+                        };
+                        if ids.iter().any(|id| id == capability.id) {
+                            ids.retain(|id| id != capability.id);
+                        } else {
+                            ids.push(capability.id.into());
                         }
                         config.plugins.insert(plugin.id.into(), settings);
                     })
                 })
                 .build(k);
-            rows.push(setting(
-                k,
-                &icons::SPARKLES,
-                capability.title,
-                Some(capability.description),
-                grant,
-            ));
+            rows.push(setting(k, &icons::SPARKLES, label, Some(&description), grant));
         }
     }
     rows

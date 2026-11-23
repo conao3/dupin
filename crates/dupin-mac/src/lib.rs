@@ -7,8 +7,8 @@ mod bundle_names;
 pub mod dictionary;
 pub mod font;
 pub mod input_source;
+pub mod quick_look;
 mod recent;
-
 mod settings_search;
 pub mod spotlight;
 pub mod watcher;

@@ -141,10 +141,12 @@ impl Provider for AppsProvider {
 
 impl App {
     fn item(&self, matched: Vec<usize>) -> Item {
-        Item {
+        let mut item = Item {
             icon: Some(self.icon.clone()),
             ..Item::path(self.path.clone(), self.name.clone(), matched)
-        }
+        };
+        crate::quick_look::add_action(&mut item);
+        item
     }
 
     /// Take the displayed name and the extra names the system reports, keeping the file name

@@ -7,6 +7,22 @@ pub enum Capability {
     CalendarRead,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Tier {
+    Visible,
+    Data,
+    Privileged,
+}
+
+impl Capability {
+    pub const fn tier(self) -> Tier {
+        match self {
+            Self::ClipboardWrite => Tier::Visible,
+            Self::CalendarRead => Tier::Data,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests;
 

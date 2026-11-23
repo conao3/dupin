@@ -1,6 +1,12 @@
 use super::*;
 use Capability::{CalendarRead, ClipboardWrite};
 
+#[test]
+fn capability_tiers_are_fixed() {
+    assert_eq!(ClipboardWrite.tier(), Tier::Visible);
+    assert_eq!(CalendarRead.tier(), Tier::Data);
+}
+
 fn permit(policy: &Policy, plugin: &PluginHandle, cap: Capability) -> Permit {
     let Access::Allowed(permit) = policy.access(plugin, cap) else {
         panic!("expected permit");
