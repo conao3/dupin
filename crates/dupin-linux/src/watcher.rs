@@ -272,6 +272,11 @@ impl Watch {
                         .unwrap_or(name_bytes.len());
                     let name = OsStr::from_bytes(&name_bytes[..name_end]);
                     offset += header + event.len as usize;
+                    if event.mask & libc::IN_Q_OVERFLOW != 0 {
+                        relevant = true;
+                        root_changed = true;
+                        continue;
+                    }
                     if event.mask & libc::IN_IGNORED != 0 {
                         self.dirs.remove(&event.wd);
                         continue;
@@ -279,11 +284,6 @@ impl Watch {
                     let Some(dir) = self.dirs.get(&event.wd).cloned() else {
                         continue;
                     };
-                    if event.mask & libc::IN_Q_OVERFLOW != 0 {
-                        relevant = true;
-                        root_changed = true;
-                        continue;
-                    }
                     let entry = (!name.is_empty()).then(|| dir.join(name));
                     let (matched, root) = classify(&self.roots, &dir, entry.as_deref(), event.mask);
                     relevant |= matched;
