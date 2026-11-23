@@ -776,6 +776,7 @@ mod native_tests {
             PluginSettings {
                 enabled: true,
                 grants: vec![],
+                revoked: vec![],
             },
         );
         let mut session = Session::new(
@@ -822,7 +823,7 @@ mod native_tests {
     }
 
     #[test]
-    fn dictionary_grants_are_scoped_revocable_and_checked_at_dispatch() {
+    fn dictionary_visible_action_is_scoped_revocable_and_checked_at_dispatch() {
         let mut config = Config::default();
         let command = CommandId::new("dictionary.lookup").unwrap();
         let operation = || Operation::OpenUrl {
@@ -835,16 +836,9 @@ mod native_tests {
             PluginSettings {
                 enabled: true,
                 grants: vec![],
+                revoked: vec![],
             },
         );
-        services.apply_config(&config);
-        assert!(services.prepare(&command, operation()).is_err());
-        config
-            .plugins
-            .get_mut("dictionary")
-            .unwrap()
-            .grants
-            .push("open-url:dict:".into());
         services.apply_config(&config);
         let prepared = services.prepare(&command, operation()).unwrap();
         let mut opened = false;
@@ -863,14 +857,18 @@ mod native_tests {
                 .is_err()
         );
         let stale = services.prepare(&command, operation()).unwrap();
-        config.plugins.get_mut("dictionary").unwrap().grants.clear();
-        services.apply_config(&config);
         config
             .plugins
             .get_mut("dictionary")
             .unwrap()
-            .grants
+            .revoked
             .push("open-url:dict:".into());
+        services.apply_config(&config);
+        assert_eq!(
+            services.prepare(&command, operation()).err(),
+            Some("This action is turned off for this plugin in Settings → Plugins.")
+        );
+        config.plugins.get_mut("dictionary").unwrap().revoked.clear();
         services.apply_config(&config);
         assert!(
             stale

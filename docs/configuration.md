@@ -26,7 +26,7 @@ At launch, a parse error makes Dupin use the defaults and report the problem. Du
 
 Set `dictionary_keywords` to a list of aliases for Dictionary search. The defaults are `define` and `d`; add, remove or replace entries to suit your workflow. Valid edits take effect without relaunching.
 
-Dictionary is disabled by default. Enable Dictionary in Settings → Plugins to use its keyword lookups. Grant **Open in Dictionary** separately to use that action; enabling lookup does not grant URL access.
+Dictionary is disabled by default. Enable Dictionary in Settings → Plugins to use its keyword lookups. Enabling Dictionary also allows its visible **Open in Dictionary** action. You can turn off that action separately in Settings → Plugins.
 
 Aliases must be non-empty, have no leading or trailing whitespace and leave other commands' keywords, such as `in`, available. Dupin reports invalid or conflicting aliases in the panel and ignores those entries; the other aliases still work.
 

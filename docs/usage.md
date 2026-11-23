@@ -90,7 +90,7 @@ Quick Look opens the native preview; Escape returns to the picker with its searc
 
 `define` or `d` followed by Space switches to Dictionary Services ("Define"). Type a word to see its definition from the dictionaries enabled in Dictionary.app. Right Arrow, Cmd+K, Enter or the Actions link opens its action screen; choose Open in Dictionary to launch the external app. Backspace on an empty query returns to app search. Set `dictionary_keywords` in [configuration](./configuration.md) to choose other aliases.
 
-Dictionary is disabled by default. Enable Dictionary in Settings → Plugins to use its keyword lookups. Grant **Open in Dictionary** separately to use that action; enabling lookup does not grant URL access.
+Dictionary is disabled by default. Enable Dictionary in Settings → Plugins to use its keyword lookups. Enabling Dictionary also allows its visible **Open in Dictionary** action. You can turn off that action separately in Settings → Plugins.
 
 Arithmetic and local unit conversions appear as a source/result card alongside
 app search; no keyword is needed. Enter copies the result while Calculator is
