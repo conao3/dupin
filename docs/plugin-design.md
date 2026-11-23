@@ -10,7 +10,7 @@ Dupin provides an input field, input routing, result selection, host-rendered vi
 actions and plugin execution. App search, file search and dictionary are still
 native providers; Recent is a bundled native plugin and the calculator runs as a
 bundled Wasm plugin. Recent's history stays in the host and its Copy path action
-uses the per-plugin clipboard grant. Currency and
+is allowed while Recent is enabled unless the user turns it off. Currency and
 calendar remain planned plugins. First-party distribution does not give a plugin
 an implicit data-access or privileged-operation grant. Visible, declared actions
 are allowed while the plugin is enabled unless the user turns them off.

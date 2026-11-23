@@ -60,7 +60,9 @@ fn collect_items(
                 return Some(item.clone());
             }
             let title = path.file_name()?.to_string_lossy().into_owned();
-            Some(Item::path(path.to_owned(), title, Vec::new()))
+            let mut item = Item::path(path.to_owned(), title, Vec::new());
+            crate::quick_look::add_action(&mut item);
+            Some(item)
         })
         .take(limit)
         .collect()
@@ -88,6 +90,9 @@ mod tests {
         assert_eq!(items[0], expected);
         assert_eq!(items[1].id, file.to_string_lossy());
         assert_eq!(items[1].display_title(), "report.txt");
+        assert!(
+            matches!(items[1].action(crate::quick_look::ACTION_ID), Some(dupin_core::Action::Preview(path)) if path == &file)
+        );
         assert_eq!(collect_items(&ids, &apps, 1, || false).len(), 1);
         assert!(collect_items(&ids, &apps, 2, || true).is_empty());
         std::fs::remove_dir_all(root).unwrap();
