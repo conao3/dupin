@@ -3,9 +3,7 @@ use std::path::PathBuf;
 use super::*;
 use crate::{Action, CommandId, CommandRegistry, CommandSpec, QueryPresentation, View};
 
-fn file_action_session() -> (Session, String, u64) {
-    let mut s = session();
-    let generation = searched(&s.set_query("file")).1;
+fn trash_row() -> Item {
     let mut row = item("file");
     row.actions.push(ItemAction::new(
         "choose",
@@ -19,9 +17,15 @@ fn file_action_session() -> (Session, String, u64) {
     );
     row.primary = Some("trash".into());
     row.alternate = Some("trash".into());
+    row
+}
+
+fn file_action_session() -> (Session, String, u64) {
+    let mut s = session();
+    let generation = searched(&s.set_query("file")).1;
     s.deliver(Delivery::Batch {
         generation,
-        items: vec![row],
+        items: vec![trash_row()],
     });
     let key = s.result_key(0);
     (s, key, generation)
@@ -85,6 +89,51 @@ fn consumed_rows_cannot_return_in_late_batches_or_remove_new_generations() {
     });
     assert!(!s.forget(&key));
     assert_eq!(s.items().len(), 1);
+}
+
+#[test]
+fn consumed_candidates_cannot_return_after_becoming_hidden() {
+    let mut commands = CommandRegistry::new(app_command(), None);
+    commands
+        .register(
+            CommandSpec::new(app_command(), 10, QueryPresentation::new("Search")).with_candidate_limit(20),
+        )
+        .unwrap();
+    let mut s = Session::new(History::default(), commands).unwrap();
+    let generation = searched(&s.set_query("file")).1;
+    let mut row = trash_row();
+    row.score = Some(0);
+    s.deliver(Delivery::Batch {
+        generation,
+        items: vec![row.clone()],
+    });
+    let key = s.result_key(0);
+    s.deliver(Delivery::Batch {
+        generation,
+        items: (0..10)
+            .map(|i| {
+                let mut other = item(&format!("other-{i}"));
+                other.score = Some(100 + i);
+                other
+            })
+            .collect(),
+    });
+    assert!(!s.items().iter().any(|item| item.id == row.id));
+    let selected = s.selected_item().unwrap().id.clone();
+    assert!(s.forget(&key));
+    assert_eq!(s.selected_item().unwrap().id, selected);
+    assert!(
+        s.providers
+            .values()
+            .all(|state| state.items.iter().all(|item| item.id != row.id))
+    );
+    row.score = Some(i32::MAX);
+    s.deliver(Delivery::Batch {
+        generation,
+        items: vec![row.clone()],
+    });
+    s.deliver(Delivery::Done { generation });
+    assert!(!s.items().iter().any(|item| item.id == row.id));
 }
 
 #[test]

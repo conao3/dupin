@@ -485,18 +485,27 @@ impl Session {
     }
 
     pub fn forget(&mut self, key: &str) -> bool {
-        let Some(index) = (0..self.items.len()).find(|&i| self.result_key(i) == key) else {
+        let generation = self.generation;
+        let Some((origin, id)) = self.providers.iter().find_map(|(origin, state)| {
+            state
+                .items
+                .iter()
+                .find(|item| format!("{generation}:{origin}:{}", item.id) == key)
+                .map(|item| (origin.clone(), item.id.clone()))
+        }) else {
             return false;
         };
-        let item = self.items.remove(index);
-        let origin = self.origins.remove(index);
         if let Some(provider) = self.providers.get_mut(&origin) {
-            provider.items.retain(|row| row.id != item.id);
+            provider.items.retain(|row| row.id != id);
         }
-        if index < self.selected {
-            self.selected -= 1;
+        if let Some(index) = (0..self.items.len()).find(|&i| self.result_key(i) == key) {
+            self.items.remove(index);
+            self.origins.remove(index);
+            if index < self.selected {
+                self.selected -= 1;
+            }
+            self.selected = self.selected.min(self.items.len().saturating_sub(1));
         }
-        self.selected = self.selected.min(self.items.len().saturating_sub(1));
         true
     }
     #[cfg(test)]
