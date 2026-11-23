@@ -22,7 +22,7 @@ use rune_kit::{
     Switch, shortcut_error_message,
 };
 
-use crate::hotkey::Binding;
+use crate::hotkey::{Binding, LauncherShortcut};
 use crate::icons;
 use crate::shader::EXAMPLES;
 use crate::ui::Ui;
@@ -173,8 +173,8 @@ pub struct Prefs {
     config: Config,
     current: Rc<RefCell<Config>>,
     page: Page,
-    recorder: ShortcutRecorderState,
-    shortcut_problem: Option<String>,
+    recorders: [ShortcutRecorderState; 2],
+    shortcut_problems: [Option<String>; 2],
     binding: Arc<Binding>,
     panel: AppHandle<Ui>,
     updater: Updater,
@@ -221,10 +221,14 @@ impl Prefs {
         welcome: bool,
     ) -> Prefs {
         let config = current.borrow().clone();
-        let mut recorder = ShortcutRecorderState::new(config.hotkey.parse().ok());
-        if binding.launch_problem(recorder.shortcut()).is_some() {
-            recorder.mark_unregistered();
-        }
+        let recorders = LauncherShortcut::ALL.map(|kind| {
+            let mut recorder =
+                ShortcutRecorderState::new(crate::hotkey::parse(kind.accelerator(&config)).ok().flatten());
+            if binding.launch_problem(kind, recorder.shortcut()).is_some() {
+                recorder.mark_unregistered();
+            }
+            recorder
+        });
         let active_radius = config.theme.corner_radius;
         Prefs {
             preview_dark: None,
@@ -232,8 +236,8 @@ impl Prefs {
             config,
             current,
             page: Page::General,
-            recorder,
-            shortcut_problem: None,
+            recorders,
+            shortcut_problems: [None, None],
             binding,
             panel,
             updater,
@@ -307,31 +311,41 @@ impl Prefs {
     }
 
     fn adopt(&mut self, config: Config) {
-        let shortcut = crate::hotkey::parse(&config.hotkey).ok().flatten();
-        if self.recorder.shortcut() != shortcut.as_ref() {
-            self.recorder = ShortcutRecorderState::new(shortcut);
-            self.shortcut_problem = None;
+        for kind in LauncherShortcut::ALL {
+            let i = kind as usize;
+            let shortcut = crate::hotkey::parse(kind.accelerator(&config)).ok().flatten();
+            if self.recorders[i].shortcut() != shortcut.as_ref() {
+                self.recorders[i] = ShortcutRecorderState::new(shortcut);
+                self.shortcut_problems[i] = None;
+            }
         }
         self.reflect_launch_hotkey();
         self.config = config;
     }
 
-    /// The panel registers the hotkey after this state is made, so it reports a failure here.
+    /// The panel registers hotkeys after Settings constructs its recorders.
     pub fn reflect_launch_hotkey(&mut self) {
-        if self.binding.launch_problem(self.recorder.shortcut()).is_some() {
-            self.recorder.mark_unregistered();
+        for kind in LauncherShortcut::ALL {
+            let recorder = &mut self.recorders[kind as usize];
+            if self.binding.launch_problem(kind, recorder.shortcut()).is_some() {
+                recorder.mark_unregistered();
+            }
         }
     }
 
     pub fn refresh_hotkey(&mut self) {
-        let restored = self.binding.refresh_launch_conflict();
-        if let Some(refused) = self.recorder.refused()
-            && Some(refused) == self.recorder.shortcut()
-            && self.recorder.error() == Some(&ShortcutError::Conflict)
-        {
-            self.shortcut_problem = self.binding.recorder_conflict(refused, &self.config);
-            if restored {
-                self.recorder.cancel();
+        for kind in LauncherShortcut::ALL {
+            let restored = self.binding.refresh_launch_conflict(kind);
+            let recorder = &mut self.recorders[kind as usize];
+            if let Some(refused) = recorder.refused()
+                && Some(refused) == recorder.shortcut()
+                && recorder.error() == Some(&ShortcutError::Conflict)
+            {
+                self.shortcut_problems[kind as usize] =
+                    self.binding.recorder_conflict(kind, refused, &self.config);
+                if restored {
+                    recorder.cancel();
+                }
             }
         }
     }
@@ -353,20 +367,24 @@ impl Prefs {
         self.panel.update(Ui::resume_restart);
     }
 
-    fn change_hotkey(&mut self, next: Option<&Shortcut>, _: &mut Tx) -> Result<(), ShortcutError> {
+    fn change_hotkey(
+        &mut self,
+        kind: LauncherShortcut,
+        next: Option<&Shortcut>,
+    ) -> Result<(), ShortcutError> {
         let base = self.current.borrow().clone();
         let result =
             if next.is_some_and(|shortcut| crate::hotkey::binding_targets(&base).contains_key(shortcut)) {
                 Err(ShortcutError::Conflict)
             } else {
-                self.binding.replace(next)
+                self.binding.replace(kind, next)
             };
-        self.shortcut_problem = next
+        self.shortcut_problems[kind as usize] = next
             .filter(|_| result == Err(ShortcutError::Conflict))
-            .and_then(|next| self.binding.recorder_conflict(next, &base));
+            .and_then(|next| self.binding.recorder_conflict(kind, next, &base));
         result?;
         self.config = base.clone();
-        self.config.hotkey = next.map(ToString::to_string).unwrap_or_default();
+        kind.set(&mut self.config, next);
         self.save(&base);
         Ok(())
     }
@@ -787,34 +805,47 @@ fn update_footer(s: &Prefs, k: &Kit) -> El {
         )
 }
 
-/// The hotkey's row, on General and in the welcome.
-fn hotkey_setting(s: &Prefs, k: &Kit) -> El {
-    let shortcut_problem = s.shortcut_problem.clone();
+fn shortcut_recorder(s: &Prefs, k: &Kit, kind: LauncherShortcut, key: &str, label: &str) -> El {
+    let i = kind as usize;
+    let shortcut_problem = s.shortcut_problems[i].clone();
     let refusal = move |error: &ShortcutError, chord: Option<&Shortcut>| {
         shortcut_problem
-            .clone()
+            .as_ref()
+            .filter(|_| *error == ShortcutError::Conflict)
+            .cloned()
             .unwrap_or_else(|| shortcut_error_message(error, chord))
     };
-    let hotkey = ShortcutRecorder::new("hotkey", &s.recorder, |s: &mut Prefs| &mut s.recorder)
-        .label("Show Dupin")
+    ShortcutRecorder::new(key, &s.recorders[i], move |s: &mut Prefs| &mut s.recorders[i])
+        .label(label)
         .width(180.0)
-        .on_change(Prefs::change_hotkey)
+        .on_change(move |s: &mut Prefs, next, _| s.change_hotkey(kind, next))
         .error_message(refusal)
         .disabled(s.read_only)
-        .build(k);
-    let shortcut = s.recorder.shortcut();
-    let detail = match (s.binding.launch_problem(shortcut), shortcut) {
+        .build(k)
+}
+
+/// The panel hotkey's row, on General and in the welcome.
+fn hotkey_setting(s: &Prefs, k: &Kit) -> El {
+    let kind = LauncherShortcut::Panel;
+    let shortcut = s.recorders[kind as usize].shortcut();
+    let detail = match (s.binding.launch_problem(kind, shortcut), shortcut) {
         (Some(crate::hotkey::LaunchProblem::Occupied(owner)), Some(chord)) => format!(
             "{owner} already uses {}, so choose another or free it there",
             chord.keycaps().join("")
         ),
-        (Some(crate::hotkey::LaunchProblem::Registration(_)), Some(chord)) => format!(
+        (Some(_), Some(chord)) => format!(
             "Dupin couldn't register {}, so choose another",
             chord.keycaps().join("")
         ),
         _ => "Shows the panel from any app".to_owned(),
     };
-    setting(k, &icons::KEYBOARD, "Hotkey", Some(&detail), hotkey)
+    setting(
+        k,
+        &icons::KEYBOARD,
+        "Hotkey",
+        Some(&detail),
+        shortcut_recorder(s, k, kind, "hotkey", "Show Dupin"),
+    )
 }
 
 fn general(s: &Prefs, k: &Kit) -> Vec<El> {
@@ -847,6 +878,19 @@ fn general(s: &Prefs, k: &Kit) -> Vec<El> {
     });
     vec![
         hotkey_setting(s, k),
+        setting(
+            k,
+            &icons::KEYBOARD,
+            "Selection hotkey",
+            Some("Searches selected text. Requires Accessibility access."),
+            shortcut_recorder(
+                s,
+                k,
+                LauncherShortcut::Selection,
+                "selection-hotkey",
+                "Search selected text",
+            ),
+        ),
         setting(
             k,
             &icons::PANEL,
@@ -1466,14 +1510,14 @@ mod tests {
         };
         assert_eq!(*current.borrow(), expected);
         assert_eq!(
-            state.recorder.shortcut(),
+            state.recorders[LauncherShortcut::Panel as usize].shortcut(),
             crate::hotkey::parse(&expected.hotkey).unwrap().as_ref()
         );
         let saved = received.recv_timeout(Duration::from_secs(5)).unwrap();
         assert_eq!(saved.result.as_ref().unwrap(), &expected);
         state.reflect_config(saved.revision, expected.clone(), false, None);
         assert_eq!(
-            state.recorder.shortcut(),
+            state.recorders[LauncherShortcut::Panel as usize].shortcut(),
             crate::hotkey::parse(&expected.hotkey).unwrap().as_ref()
         );
         assert_eq!(saved.revision, settings.revision());

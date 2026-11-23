@@ -4,6 +4,8 @@ use std::ptr::{self, NonNull};
 use objc2_core_foundation::{CFArray, CFGetTypeID, CFRetained, CFString, CFType, CFTypeID};
 use objc2_foundation::{NSPoint, NSRect, NSSize};
 
+use crate::accessibility;
+
 // The launcher waits for two messages before it can open on the chosen display.
 const MESSAGING_TIMEOUT_SECONDS: f32 = 0.020;
 const STOP_ON_ERROR: u32 = 1;
@@ -12,10 +14,6 @@ const AX_SIZE: u32 = 2;
 
 #[link(name = "ApplicationServices", kind = "framework")]
 unsafe extern "C" {
-    fn AXUIElementGetTypeID() -> CFTypeID;
-    fn AXUIElementCreateApplication(pid: i32) -> *mut CFType;
-    fn AXUIElementSetMessagingTimeout(element: &CFType, timeout: f32) -> i32;
-    fn AXUIElementCopyAttributeValue(element: &CFType, attribute: &CFString, value: &mut *mut CFType) -> i32;
     fn AXUIElementCopyMultipleAttributeValues(
         element: &CFType,
         attributes: &CFArray<CFString>,
@@ -27,10 +25,8 @@ unsafe extern "C" {
 }
 
 pub(crate) fn frame(pid: i32) -> Option<NSRect> {
-    // SAFETY: The Create call gives us an owned AXUIElement reference for this PID.
-    let app = unsafe { CFRetained::from_raw(NonNull::new(AXUIElementCreateApplication(pid))?) };
-    let app = timed(app)?;
-    let window = attribute(&app, "AXFocusedWindow")?;
+    let app = timed(accessibility::application(pid)?)?;
+    let window = accessibility::attribute(&app, "AXFocusedWindow")?;
     let window = timed(window)?;
     let attributes =
         CFArray::from_objects(&[&*CFString::from_str("AXPosition"), &*CFString::from_str("AXSize")]);
@@ -48,24 +44,8 @@ pub(crate) fn frame(pid: i32) -> Option<NSRect> {
 }
 
 fn timed(element: CFRetained<CFType>) -> Option<CFRetained<CFType>> {
-    // SAFETY: Check the CF type before passing the object to the element-specific API.
-    if CFGetTypeID(Some(&element)) != unsafe { AXUIElementGetTypeID() } {
-        return None;
-    }
-    // SAFETY: The check above establishes that this is an AXUIElement.
     // Bound calls to the foreground app without changing the process-wide timeout.
-    (unsafe { AXUIElementSetMessagingTimeout(&element, MESSAGING_TIMEOUT_SECONDS) } == 0).then_some(element)
-}
-
-fn attribute(element: &CFType, name: &str) -> Option<CFRetained<CFType>> {
-    let mut value = ptr::null_mut();
-    // SAFETY: Callers pass elements checked by `timed`. Copy returns an owned CF reference.
-    unsafe {
-        if AXUIElementCopyAttributeValue(element, &CFString::from_str(name), &mut value) != 0 {
-            return None;
-        }
-        Some(CFRetained::from_raw(NonNull::new(value)?))
-    }
+    accessibility::set_timeout(&element, MESSAGING_TIMEOUT_SECONDS).then_some(element)
 }
 
 fn read_frame(position: &CFType, size: &CFType) -> Option<NSRect> {

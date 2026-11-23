@@ -19,7 +19,7 @@ pub(super) struct Entry {
 pub(super) const ENTRIES: &[Entry] = &[
     Entry {
         permission: Permission::Accessibility,
-        used_by: &[],
+        used_by: &["focused window display", "selected-text search"],
     },
     Entry {
         permission: Permission::Calendars,

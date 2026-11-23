@@ -10,6 +10,12 @@ The welcome appears once. It is skipped when `history.json` already exists in `~
 
 Settings → Permissions appears when a feature uses a macOS permission. It shows each relevant grant and links to its pane in System Settings. Dupin asks for access only when you use a feature that needs it. File search uses the Spotlight index and needs no grant.
 
+## Search selected text
+
+Set a **Selection hotkey** in Settings → General. Select text in another app and press the shortcut to open Dupin with that text in the query field. Type to replace the selection. If the app exposes no selected text, Dupin opens with an empty query.
+
+Dupin needs macOS Accessibility access for this shortcut. If access is missing, choose **Open System Settings** in the panel and enable Dupin under **Privacy & Security → Accessibility**, then try again.
+
 ## Keys
 
 | Key                                     | In the panel                                          |
