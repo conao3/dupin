@@ -280,7 +280,7 @@ fn action_list(s: &Ui, t: &ResolvedTheme, accent: Color) -> El {
                         .enumerate()
                         .map(|(index, title)| {
                             let on = index == *selected;
-                            let red = rune::color::hex("#d9363e").unwrap();
+                            let red = t.destructive;
                             row()
                                 .key(format!("action-{index}"))
                                 .w_full()
@@ -336,7 +336,7 @@ fn action_list(s: &Ui, t: &ResolvedTheme, accent: Color) -> El {
                                     .color(if on {
                                         t.selected_text
                                     } else if action.confirmation().is_some() {
-                                        rune::color::hex("#d9363e").unwrap()
+                                        t.destructive
                                     } else {
                                         t.text
                                     })
@@ -694,6 +694,7 @@ pub struct ResolvedTheme {
     palette: tok::Theme,
     pub accent: Color,
     pub selected_text: Color,
+    pub destructive: Color,
     scale: f32,
     family: tok::Family,
 }
@@ -722,6 +723,7 @@ impl ResolvedTheme {
             palette,
             accent: color(&c.accent, tok::accent(0, dark)),
             selected_text: color(&c.selected_text, Color::WHITE),
+            destructive: rune::color::hex(if dark { "#FF453A" } else { "#FF3B30" }).unwrap(),
             scale: theme.font_size as f32 / 15.0,
             family: match theme.font_family {
                 dupin_core::config::FontFamily::System => tok::Family::Sans,

@@ -134,6 +134,7 @@ impl ActionScreen {
                 return ActionKey::Back;
             }
             self.stage = ActionStage::List;
+            crate::trace::action_screen("list");
             return ActionKey::Stay;
         }
         match &mut self.stage {
@@ -142,7 +143,10 @@ impl ActionScreen {
                     Key::Up => *selected = 0,
                     Key::Down => *selected = 1,
                     Key::Enter if *selected == 1 => return ActionKey::Confirm,
-                    Key::Enter => self.stage = ActionStage::List,
+                    Key::Enter => {
+                        self.stage = ActionStage::List;
+                        crate::trace::action_screen("list");
+                    }
                     _ => {}
                 }
                 return ActionKey::Stay;
@@ -728,6 +732,7 @@ impl Ui {
                 tx.focus("query", false);
             } else {
                 screen.stage = ActionStage::List;
+                crate::trace::action_screen("list");
             }
         }
     }
@@ -818,7 +823,19 @@ impl Ui {
                 );
             }
         }
-        crate::trace::action_screen("applications ready");
+        crate::trace::action_screen(
+            if matches!(
+                screen.stage,
+                ActionStage::Applications {
+                    state: ApplicationState::Ready(_),
+                    ..
+                }
+            ) {
+                "applications ready"
+            } else {
+                "applications failed"
+            },
+        );
     }
 
     pub fn confirm_action(&mut self, tx: &mut Tx) {
@@ -842,6 +859,7 @@ impl Ui {
             *index = selected.min(1);
             if selected == 0 {
                 screen.stage = ActionStage::List;
+                crate::trace::action_screen("list");
             } else {
                 self.confirm_action(tx);
             }
@@ -1010,7 +1028,7 @@ impl Ui {
                         running.fetch_sub(1, Ordering::AcqRel);
                     });
                 }
-                Effect::RunConsuming { .. } => {}
+                Effect::RunConsuming { .. } => crate::log::warn("unsupported consuming action"),
                 Effect::Hide => self.hide(tx),
                 Effect::RevealSelection => {
                     if self.session.selected_item().is_some() {
@@ -1037,6 +1055,9 @@ impl Ui {
     }
 
     fn timed_notice(&mut self, notice: String, tx: &mut Tx) {
+        if self.notice.is_some() && self.notice_until.is_none() {
+            return;
+        }
         self.notice = Some(notice);
         self.notice_until = Some(tx.clock() + 5.0);
         tx.wake_at(tx.clock() + 5.0);

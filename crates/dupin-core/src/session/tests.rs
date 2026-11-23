@@ -87,6 +87,19 @@ fn consumed_rows_cannot_return_in_late_batches_or_remove_new_generations() {
     assert_eq!(s.items().len(), 1);
 }
 
+#[test]
+fn consuming_an_earlier_row_keeps_the_same_item_selected() {
+    let (mut s, key, generation) = file_action_session();
+    s.deliver(Delivery::Batch {
+        generation,
+        items: vec![item("next"), item("last")],
+    });
+    s.intent(Intent::Down);
+    let selected = s.selected_item().unwrap().id.clone();
+    assert!(s.forget(&key));
+    assert_eq!(s.selected_item().unwrap().id, selected);
+}
+
 fn command(value: &str) -> CommandId {
     CommandId::new(value).unwrap()
 }

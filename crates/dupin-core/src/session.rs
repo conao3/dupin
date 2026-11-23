@@ -493,6 +493,9 @@ impl Session {
         if let Some(provider) = self.providers.get_mut(&origin) {
             provider.items.retain(|row| row.id != item.id);
         }
+        if index < self.selected {
+            self.selected -= 1;
+        }
         self.selected = self.selected.min(self.items.len().saturating_sub(1));
         true
     }
