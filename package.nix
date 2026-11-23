@@ -143,24 +143,24 @@ let
       platforms = [ "aarch64-darwin" ];
     };
   };
-  # A bare executable. winit, wgpu, x11rb and fontique open these libraries at run time; they go
-  # on its RUNPATH after the fixup shrinks it, rather than in LD_LIBRARY_PATH, which the apps
-  # Dupin launches would inherit.
+  # The libraries winit, wgpu, x11rb and fontique open at run time on Linux. They go on the
+  # executable's RUNPATH, here after the fixup shrinks it and in the development shell through
+  # the linker, rather than in LD_LIBRARY_PATH, which the apps Dupin launches would inherit.
+  runtimeLibraries = lib.optionals stdenv.hostPlatform.isLinux [
+    libxkbcommon
+    wayland
+    vulkan-loader
+    libx11
+    libxcursor
+    libxi
+    libxrandr
+    libxcb
+    fontconfig
+  ];
+  # A bare executable.
   linuxPackaging = {
     postFixup = ''
-      patchelf --add-rpath ${
-        lib.makeLibraryPath [
-          libxkbcommon
-          wayland
-          vulkan-loader
-          libx11
-          libxcursor
-          libxi
-          libxrandr
-          libxcb
-          fontconfig
-        ]
-      } $out/bin/dupin
+      patchelf --add-rpath ${lib.makeLibraryPath runtimeLibraries} $out/bin/dupin
     '';
     meta = {
       description = "A lightweight resident launcher";
@@ -188,6 +188,7 @@ rustPlatform.buildRustPackage (
         cargoVendorDir
         cargoSrc
         bundleSrc
+        runtimeLibraries
         ;
     };
   }

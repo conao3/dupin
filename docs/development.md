@@ -36,7 +36,7 @@ For rebuild times and the sccache decision, see [Build caching](#build-caching).
 
 ## Linux
 
-On x86_64 Linux, `nix build .#dupin` builds a bare `result/bin/dupin`, with the libraries winit, wgpu (Vulkan) and fontconfig open at run time on its RUNPATH. Start it from the X session; ⌘Space is Super+Space.
+On x86_64 Linux, `nix build .#dupin` builds a bare `result/bin/dupin`, with the libraries winit, wgpu (Vulkan) and fontconfig open at run time on its RUNPATH; in the development shell, `cargo run -p dupin` links them onto the RUNPATH the same way. Start it from the X session; ⌘Space is Super+Space.
 
 ```sh
 nix build .#dupin
