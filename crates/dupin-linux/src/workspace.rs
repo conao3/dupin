@@ -5,6 +5,7 @@ use std::ffi::OsString;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 use crate::desktop_entry::{self, Locale};
 
@@ -25,8 +26,8 @@ pub enum Action {
 }
 
 /// Carry out `action`, or say why the system refused it (a vanished file, say). Blocks until
-/// `xdg-open` returns, so callers run it off the main thread. Linux results offer no "Open
-/// with…" or "Move to Trash", so those actions are refused.
+/// `xdg-open` returns or `HANDOFF` passes, so callers run it off the main thread. Linux results
+/// offer no "Open with…" or "Move to Trash", so those actions are refused.
 pub fn run(action: &Action) -> Result<(), String> {
     match action {
         Action::Open(path) => open(path)
@@ -83,13 +84,31 @@ fn reveal(path: &Path) -> bool {
     xdg_open(folder.as_os_str())
 }
 
+/// How long `xdg-open` has to report a failure. Some desktops' `xdg-open` runs the handler in
+/// the foreground and returns only when it exits; one still running by then counts as opened.
+const HANDOFF: Duration = Duration::from_secs(2);
+
 fn xdg_open(target: &std::ffi::OsStr) -> bool {
-    Command::new("xdg-open")
+    let Ok(mut child) = Command::new("xdg-open")
         .arg(target)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .status()
-        .is_ok_and(|status| status.success())
+        .spawn()
+    else {
+        return false;
+    };
+    let deadline = Instant::now() + HANDOFF;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return status.success(),
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
+            Ok(None) => {
+                std::thread::spawn(move || child.wait());
+                return true;
+            }
+            Err(_) => return false,
+        }
+    }
 }
 
 /// Start a desktop entry's app in a session of its own, so it outlives Dupin.
