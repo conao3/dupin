@@ -23,7 +23,8 @@ pub struct Config {
     pub web_searches: BTreeMap<String, WebSearch>,
     /// Web search keywords offered when no regular results match.
     pub web_fallbacks: Vec<String>,
-    /// Where the panel opens on the display under the pointer.
+    pub display: DisplaySelection,
+    /// Where the panel opens on the selected display.
     pub position: Position,
     /// The keyboard input source to type with while the panel shows.
     pub input_source: InputSource,
@@ -123,6 +124,15 @@ pub enum Position {
     Top,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DisplaySelection {
+    #[default]
+    Mouse,
+    Main,
+    Active,
+}
+
 impl Default for Config {
     fn default() -> Self {
         Config {
@@ -141,6 +151,7 @@ impl Default for Config {
             .map(str::to_owned)
             .collect(),
             dictionary_keywords: vec!["define".into(), "d".into()],
+            display: DisplaySelection::default(),
             web_searches: BTreeMap::from([
                 (
                     "g".into(),
@@ -190,6 +201,21 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_the_display_selection() {
+        assert_eq!(Config::default().display, DisplaySelection::Mouse);
+        for (name, expected) in [
+            ("mouse", DisplaySelection::Mouse),
+            ("main", DisplaySelection::Main),
+            ("active", DisplaySelection::Active),
+        ] {
+            let config = Config::parse(&format!("display = \"{name}\"")).unwrap();
+            assert_eq!(config.display, expected);
+            assert_eq!(serde_json::to_value(&config).unwrap()["display"], name);
+        }
+        assert!(Config::parse("display = \"other\"").is_err());
+    }
 
     #[test]
     fn defaults_to_command_space() {

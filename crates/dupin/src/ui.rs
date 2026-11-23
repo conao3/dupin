@@ -9,9 +9,11 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 
 use dupin_core::{
-    Backdrop, CommandId, Config, Delivery, Effect, History, InputSource, Intent, Position, Searcher, Session,
+    Backdrop, CommandId, Config, Delivery, DisplaySelection, Effect, History, InputSource, Intent, Position,
+    Searcher, Session,
 };
-use dupin_mac::{AppsProvider, AppsWatcher, quick_look::Previewer};
+use dupin_mac::{AppsProvider, AppsWatcher, accessibility, quick_look::Previewer, window::DisplayNotice};
+use objc2_foundation::NSRect;
 use rune::{
     Align, AppHandle, DisplayTarget, Image, ImageCache, Key, KeyEvent, OverlayPlacement, ScreenEdge,
     TextEdit, Tx, Waker,
@@ -19,10 +21,21 @@ use rune::{
 
 /// Icons kept decoded: enough for a full file result list and the apps around it.
 const ICON_CAP: usize = 512;
-/// The panel's top edge below the display's for `position = "top"`: about where Spotlight
-/// puts its field.
+// Match Spotlight's offset for the top position.
 const TOP_MARGIN: f32 = 180.0;
 pub const ICON_SIZE: f32 = 32.0;
+
+fn panel_offsets(frame: NSRect, visible: NSRect, width: u16, position: Position) -> (f32, f32) {
+    let inset = visible.origin.x - frame.origin.x + ((visible.size.width - f64::from(width)) / 2.0).max(0.0);
+    let top = frame.max().y - visible.max().y;
+    // Use the query field's height so results can grow below it.
+    let room = (visible.size.height - f64::from(crate::HEADER_HEIGHT)).max(0.0);
+    let offset = match position {
+        Position::Center => room / 2.0,
+        Position::Top => f64::from(TOP_MARGIN).min(room),
+    };
+    (inset as f32, (top + offset) as f32)
+}
 
 pub struct Busy(Arc<AtomicUsize>);
 
@@ -265,6 +278,8 @@ pub struct Ui {
     _apps_watcher: Option<AppsWatcher>,
     saver: crate::store::Saver,
     position: Position,
+    display: DisplaySelection,
+    pub display_notice: Option<DisplayNotice>,
     input_source: InputSource,
     /// The input source to put back when the panel hides, if showing it switched one.
     restore_input: Option<dupin_mac::input_source::Previous>,
@@ -272,6 +287,7 @@ pub struct Ui {
     relaunch: Option<Restart>,
     settings_after_close: bool,
     snapshots_after_close: bool,
+    accessibility_after_close: bool,
     /// Actions handed to Launch Services that haven't returned yet; a relaunch waits for them.
     running: Arc<AtomicUsize>,
     updater: crate::update::Updater,
@@ -458,12 +474,15 @@ impl Ui {
             deadlines: HashMap::new(),
             _apps_watcher: apps_watcher,
             position: config.position,
+            display: config.display,
+            display_notice: None,
             input_source: config.input_source.clone(),
             configuration,
             restore_input: None,
             relaunch: None,
             settings_after_close: false,
             snapshots_after_close: false,
+            accessibility_after_close: false,
             running,
             updater,
             quick_look,
@@ -509,6 +528,10 @@ impl Ui {
             self.apply(effects, tx);
         }
         self.position = config.position;
+        self.display = config.display;
+        if self.display != DisplaySelection::Active {
+            self.display_notice = None;
+        }
         self.input_source = config.input_source.clone();
         self.updater.set_enabled(config.auto_update);
         if self.backdrop_pick != config.backdrop {
@@ -652,36 +675,63 @@ impl Ui {
         }
     }
 
-    /// The panel's top edge below the display's, for the configured position. Centering puts
-    /// the field (not the whole panel, which grows with results) at the display's middle.
-    fn top_margin(&self) -> f32 {
-        match self.position {
-            Position::Top => TOP_MARGIN,
-            Position::Center => dupin_mac::window::pointer_display_height().map_or(TOP_MARGIN, |h| {
-                ((h as f32 - crate::view::HEADER_H) / 2.0).max(0.0)
-            }),
-        }
-    }
-
     fn show(&mut self, tx: &mut Tx) {
         crate::trace::summoned();
         if let Some(problem) = self.backdrop.refresh() {
             crate::log::warn(problem);
         }
         self.query.focused = true;
-        self.me.place(
-            DisplayTarget::UnderPointer,
-            OverlayPlacement::Edge {
-                edge: ScreenEdge::Top,
-                margin: self.top_margin(),
-                align: Align::Center,
-                inset: 0.0,
-            },
-        );
+        if !self.shown {
+            self.place_panel();
+        }
         self.shown = true;
         self.shown_at = tx.clock();
         self.force_input_source();
         self.me.show();
+    }
+
+    fn place_panel(&mut self) {
+        self.display_notice = None;
+        let (display, align, inset, margin) = if !rune::tooling::is_headless()
+            && let Some(screen) = dupin_mac::window::display_geometry(self.display)
+        {
+            self.display_notice = screen.notice;
+            let (inset, margin) = panel_offsets(
+                screen.frame,
+                screen.visible_frame,
+                self.theme.panel_width,
+                self.position,
+            );
+            (
+                DisplayTarget::Native(rune::NativeDisplayId::MacOS(screen.native_id)),
+                Align::Start,
+                inset,
+                margin,
+            )
+        } else {
+            let display = match self.display {
+                DisplaySelection::Mouse => DisplayTarget::UnderPointer,
+                DisplaySelection::Main | DisplaySelection::Active => DisplayTarget::Primary,
+            };
+            (display, Align::Center, 0.0, TOP_MARGIN)
+        };
+        self.me.place(
+            display,
+            OverlayPlacement::Edge {
+                edge: ScreenEdge::Top,
+                margin,
+                align,
+                inset,
+            },
+        );
+    }
+
+    pub fn open_accessibility_settings(&mut self, tx: &mut Tx) {
+        if self.display_notice != Some(DisplayNotice::AccessibilityRequired) || rune::tooling::is_headless() {
+            return;
+        }
+        self.accessibility_after_close = true;
+        self.dismiss(tx);
     }
 
     fn force_input_source(&mut self) {
@@ -715,6 +765,18 @@ impl Ui {
 
     pub fn closed(&mut self, _: &mut Tx) {
         crate::trace::panel("closed", self.me.is_visible(), self.shown);
+        if std::mem::take(&mut self.accessibility_after_close) {
+            let me = self.me.clone();
+            std::thread::spawn(move || {
+                if !accessibility::is_trusted() && accessibility::request_once() {
+                    return;
+                }
+                let settings = dupin_mac::workspace::Action::OpenUrl(accessibility::SETTINGS_URL.into());
+                if let Err(error) = dupin_mac::workspace::run(&settings) {
+                    me.update(move |ui, tx| ui.show_notice(error, tx));
+                }
+            });
+        }
         if std::mem::take(&mut self.snapshots_after_close) {
             self.snapshots.open();
         }
@@ -1485,6 +1547,33 @@ mod ui_helper_tests {
 #[cfg(test)]
 mod config_tests {
     use super::*;
+    use objc2_foundation::{NSPoint, NSSize};
+
+    fn rect(x: f64, y: f64, width: f64, height: f64) -> NSRect {
+        NSRect::new(NSPoint::new(x, y), NSSize::new(width, height))
+    }
+
+    #[test]
+    fn places_the_query_inside_the_selected_screens_visible_frame() {
+        let frame = rect(100.0, -900.0, 1440.0, 900.0);
+        let visible = rect(160.0, -850.0, 1380.0, 820.0);
+        assert_eq!(
+            panel_offsets(frame, visible, 680, Position::Center),
+            (410.0, 408.0)
+        );
+        assert_eq!(panel_offsets(frame, visible, 680, Position::Top), (410.0, 210.0));
+        assert_eq!(
+            panel_offsets(frame, visible, 400, Position::Center),
+            (550.0, 408.0)
+        );
+    }
+
+    #[test]
+    fn top_spacing_cannot_push_the_query_below_the_visible_area() {
+        let frame = rect(-800.0, 200.0, 800.0, 150.0);
+        let visible = rect(-800.0, 200.0, 800.0, 120.0);
+        assert_eq!(panel_offsets(frame, visible, 680, Position::Top), (60.0, 86.0));
+    }
 
     #[test]
     fn cosmetic_configuration_retains_query_selection_history_and_pending_search() {

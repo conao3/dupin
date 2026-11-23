@@ -119,6 +119,42 @@ pub fn view(s: &Ui, cx: &mut Cx<Ui>) -> El {
             ),
         );
     }
+    use dupin_mac::window::DisplayNotice;
+    if let Some(notice) = s.display_notice {
+        let message = match notice {
+            DisplayNotice::AccessibilityRequired => {
+                "Dupin needs Accessibility access to find the focused window. Using the main display."
+            }
+            DisplayNotice::FocusedWindowUnavailable => {
+                "Couldn't find the focused window's display. Using the main display."
+            }
+        };
+        panel = panel.child(divider(&t)).child(
+            col()
+                .key("display-notice")
+                .w_full()
+                .px(18.0)
+                .py(12.0)
+                .gap(8.0)
+                .fill(WARNING)
+                .child(
+                    text(message)
+                        .font(t.font(type_::BODY.lh(18.0)))
+                        .color(t.text)
+                        .wrap()
+                        .w_full(),
+                )
+                .children((notice == DisplayNotice::AccessibilityRequired).then(|| {
+                    text("Set Up Accessibility")
+                        .font(t.font(type_::BODY))
+                        .color(accent)
+                        .key("open-accessibility-settings")
+                        .role("button")
+                        .focusable(true)
+                        .on_press_tx(Ui::open_accessibility_settings)
+                })),
+        );
+    }
     for (origin, failure) in s.session.failures() {
         panel = panel.child(
             row()
