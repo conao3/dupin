@@ -332,6 +332,7 @@ pub struct Ui {
     backdrop_pick: Backdrop,
     icon_cache: Option<ImageCache>,
     searchers: HashMap<CommandId, Searcher>,
+    currency: crate::calculator::Currency,
     web: Arc<RwLock<crate::web::WebCatalog>>,
     snippets: Arc<RwLock<dupin_core::snippets::SnippetCatalog>>,
     /// A snippet to paste once the panel has closed and the front app has its keys back.
@@ -507,6 +508,17 @@ impl Ui {
         } = windows;
         let config = configuration.values.borrow().clone();
         let apps_provider = Arc::new(AppsProvider::standard());
+        let currency = crate::calculator::Currency::start({
+            let me = me.clone();
+            move || {
+                me.update(|s, tx| {
+                    if s.currency.enabled() && !s.session.query().trim().is_empty() {
+                        s.refresh_default(tx);
+                    }
+                })
+            }
+        });
+        currency.set_enabled(config.calculator && config.calculator_currency);
         let clipboard = crate::clipboard::Clipboard::new(&config.clipboard);
         let calendar = if rune::tooling::is_headless() {
             dupin_mac::CalendarProvider::fixtures()
@@ -527,6 +539,7 @@ impl Ui {
             history,
             calendar,
             clipboard.history(),
+            currency.calculator(),
         )
         .expect("built-in command registration is valid");
         let runner = crate::scripts::runner::Runner::new(
@@ -614,6 +627,7 @@ impl Ui {
             backdrop_pick: config.backdrop.clone(),
             icon_cache: None,
             searchers,
+            currency,
             web: registration.web,
             snippets: registration.snippets,
             paste_after_close: None,
@@ -690,10 +704,13 @@ impl Ui {
         }
         let is_apps = self.session.command_id().as_str() == crate::commands::APPS;
         let empty = self.session.query().trim().is_empty();
+        let currency_changed = self
+            .currency
+            .set_enabled(config.calculator && config.calculator_currency);
         if !effects.is_empty() {
             self.apply(effects, tx);
         } else if self.session.command().result_limit != previous_limit
-            || (web_changed && is_apps && !empty)
+            || ((web_changed || currency_changed) && is_apps && !empty)
             || (ranking_changed && self.session.command_id().as_str() == crate::commands::FILES)
             || (clipboard_changed && self.session.command_id().as_str() == crate::commands::CLIPBOARD)
             || (snippets_changed && self.session.command_id().as_str() == crate::commands::SNIPPETS)

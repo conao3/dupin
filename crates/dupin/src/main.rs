@@ -8,6 +8,7 @@ mod clipboard;
 mod commands;
 mod control;
 mod hotkey;
+mod http;
 mod icons;
 mod log;
 mod mcp;
@@ -21,6 +22,7 @@ mod trace;
 mod ui;
 mod update;
 mod view;
+mod wall_clock;
 mod web;
 mod window_management;
 

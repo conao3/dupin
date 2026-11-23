@@ -20,6 +20,7 @@ snippet_keywords = ["snip"] # type any keyword, then Space, to search snippets
 snippet_paste = false # whether Enter on a snippet also pastes it into the front app
 window_management = false # show commands to move and resize windows in normal search
 calculator = true # show calculations and unit conversions in app search
+calculator_currency = false # allow downloading exchange rates when Calculator is on
 position = "center" # "center" puts the field at the middle of the display; "top" near its top
 input_source = "ascii" # "ascii", "keep", or an input source identifier such as "com.apple.keylayout.ABC"
 auto_update = true # whether a release build checks for and installs its channel's updates by itself
@@ -81,6 +82,15 @@ args = ["Hello from Dupin"]
 ```
 
 Each shortcut must be distinct from the panel and selection shortcuts and other bindings. Settings → General lists the configured bindings. Edits reload automatically. Dupin reports clashes and invalid script bindings in Settings and in the panel. If the script is missing, unavailable or its arguments are invalid, Dupin skips that binding and applies the rest of the configuration. Fixing the script or binding makes the shortcut available automatically.
+
+Turn on **Currency conversion** in Settings → Search to convert currencies in
+app search. Try `100 USD to JPY`, `€50 in GBP` or `10 GBP` (which converts to EUR).
+Dupin checks the European Central Bank's public reference feed in the background
+at most once every 12 hours. The request contains no search text. The calculator
+uses the last good rates offline and shows their observation date. It labels
+rates as cached if they have not been refreshed in the past 12 hours.
+Rates are stored in `~/Library/Caches/Dupin/calculator`, or in
+`$XDG_CACHE_HOME/dupin/calculator` when that variable is set.
 
 ## Web searches
 

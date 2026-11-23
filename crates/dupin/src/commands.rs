@@ -331,6 +331,7 @@ pub fn register(
     history: History,
     calendar: CalendarProvider,
     clipboard: Arc<Mutex<dupin_core::clipboard::History>>,
+    calculator: crate::calculator::Calculator,
 ) -> Result<Registration, dupin_core::CommandError> {
     let ConfiguredCommands {
         registry,
@@ -358,10 +359,7 @@ pub fn register(
             id(SCRIPTS),
             Arc::new(crate::scripts::provider::ScriptsProvider(scripts.clone())) as Arc<dyn Provider>,
         ),
-        (
-            id(CALCULATOR),
-            Arc::new(crate::calculator::Calculator) as Arc<dyn Provider>,
-        ),
+        (id(CALCULATOR), Arc::new(calculator) as Arc<dyn Provider>),
         (
             id(SETTINGS),
             Arc::new(dupin_mac::SettingsProvider::default()) as Arc<dyn Provider>,
@@ -440,7 +438,7 @@ mod tests {
             })
             .unwrap();
         let mut items = Vec::new();
-        crate::calculator::Calculator
+        crate::calculator::Calculator::default()
             .search(&Request::detached("12*3", 1), &mut |batch| items.extend(batch))
             .unwrap();
         session.deliver_from(

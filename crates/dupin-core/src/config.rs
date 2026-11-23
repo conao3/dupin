@@ -25,6 +25,7 @@ pub struct Config {
     pub dictionary_keywords: Vec<String>,
     pub window_management: bool,
     pub calculator: bool,
+    pub calculator_currency: bool,
     /// Web search keywords and their URL templates. `{query}` is replaced when selected.
     pub web_searches: BTreeMap<String, WebSearch>,
     /// Web search keywords offered when no regular results match.
@@ -205,6 +206,7 @@ impl Default for Config {
             display: DisplaySelection::default(),
             window_management: false,
             calculator: true,
+            calculator_currency: false,
             web_searches: BTreeMap::from([
                 (
                     "g".into(),
