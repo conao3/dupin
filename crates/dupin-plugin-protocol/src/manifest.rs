@@ -11,7 +11,20 @@ pub enum Capability {
     CalendarRead,
     OpenUrl(crate::url_scope::UrlScope),
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Tier {
+    Visible,
+    Data,
+    Privileged,
+}
 impl Capability {
+    pub const fn tier(&self) -> Tier {
+        match self {
+            Self::ClipboardWrite | Self::OpenUrl(_) => Tier::Visible,
+            Self::CalendarRead => Tier::Data,
+            Self::SystemSleep | Self::SystemLockScreen => Tier::Privileged,
+        }
+    }
     pub fn id(&self) -> String {
         match self {
             Self::OpenUrl(scope) => return scope.id(),
@@ -74,8 +87,6 @@ impl Eligibility {
 #[serde(deny_unknown_fields)]
 pub struct CapabilityDescriptor {
     pub id: String,
-    pub title: String,
-    pub description: String,
     pub kind: Capability,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -190,11 +201,7 @@ impl Manifest {
         }
         let mut caps = BTreeSet::new();
         for cap in &self.capabilities {
-            if cap.id != cap.kind.id()
-                || !caps.insert(cap.kind.clone())
-                || !text(&cap.title, 128)
-                || !text(&cap.description, 1024)
-            {
+            if cap.id != cap.kind.id() || !caps.insert(cap.kind.clone()) {
                 return Err("invalid capability identity");
             }
         }
@@ -261,8 +268,7 @@ mod tests {
         v["actions"] = serde_json::json!(["open_url"]);
         assert!(decode(&v).is_err());
         v["capabilities"] = serde_json::json!([{
-            "id": "open-url:https:example.com", "title": "Open example",
-            "description": "Open example URLs", "kind": {"open-url": {"scheme": "HTTPS", "host": "EXAMPLE.COM"}}
+            "id": "open-url:https:example.com", "kind": {"open-url": {"scheme": "HTTPS", "host": "EXAMPLE.COM"}}
         }]);
         let manifest = decode(&v).unwrap();
         assert!(manifest.allows_operation(&Operation::OpenUrl {
@@ -372,6 +378,19 @@ mod tests {
         v["capabilities"][0]["kind"] = "system-sleep".into();
         v["actions"] = serde_json::json!(["sleep"]);
         assert!(decode(&v).is_err());
+    }
+
+    #[test]
+    fn capability_tiers_and_host_owned_labels_are_fixed() {
+        assert_eq!(Capability::ClipboardWrite.tier(), Tier::Visible);
+        assert_eq!(Capability::CalendarRead.tier(), Tier::Data);
+        assert_eq!(Capability::SystemSleep.tier(), Tier::Privileged);
+        assert_eq!(Capability::SystemLockScreen.tier(), Tier::Privileged);
+        for field in ["title", "description"] {
+            let mut manifest = value();
+            manifest["capabilities"][0][field] = "Untrusted capability label".into();
+            assert!(decode(&manifest).is_err());
+        }
     }
     #[test]
     fn undeclared_guest_views_and_operations_are_rejected() {

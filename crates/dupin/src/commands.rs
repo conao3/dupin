@@ -324,6 +324,7 @@ mod tests {
             dupin_core::config::PluginSettings {
                 enabled: true,
                 grants: vec![],
+                revoked: vec![],
             },
         );
         let configured = configured(&config).unwrap();

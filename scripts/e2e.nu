@@ -6,6 +6,7 @@
 # Snapshots hold whatever the panel lists, so run this only on a disposable machine.
 
 use e2e-recording.nu record
+use e2e-state.nu is-focused-query
 
 # Run the scenario against `app`, keeping each step's last agent-desktop reply, a snapshot and a
 # screenshot per stage, and Dupin's log in `out`.
@@ -55,10 +56,11 @@ def "main run" [app: path, --out: path = 'target/e2e', --record] {
     if (open --raw $log | lines | any {|line| $line =~ '^dupin: backdrop (shader|pipeline)' }) {
         error make {msg: $"the backdrop shader failed; see ($log)"}
     }
-    print 'e2e: the panel opened Calculator, and Settings showed its pages'
+    print 'e2e: Quick Look returned to the query, the panel opened Calculator, Dupin Settings and the Bluetooth pane'
 }
 
 def scenario [out: path] {
+    let log = $out | path join dupin.log
     ad $out press-hotkey press alt+space | ignore
     let focused = {|r| $r.ok and 'focused' in ($r.data?.match?.states? | default []) }
     poll $out field $focused find --app Dupin --role textfield --first
@@ -86,6 +88,31 @@ def scenario [out: path] {
     let found = {|r| $r.ok and $r.data?.match? != null }
     poll $out result $found find --app Dupin --name $row --exact --first
     snap $out results
+
+    ad $out preview-shortcut press cmd+y | ignore
+    # Quick Look is visible in recordings but absent from Dupin's AX window list.
+    wait-for-log $log 'dupin-trace: quick-look shown visible=true key=true'
+    snap $out quick-look
+    let left_before = open --raw $log | lines | where {|line| $line | str contains 'dupin-trace: key Left ' } | length
+    let closed_before = open --raw $log | lines | where {|line| $line | str contains 'dupin-trace: quick-look picker input visible=false key=false' } | length
+    ad $out close-preview press escape | ignore
+    let restored = {|r| is-focused-query $r calculator }
+    (poll
+        $out
+        quick-look-restored
+        $restored
+        find
+        --app
+        Dupin
+        --role
+        textfield
+        --first
+    )
+    ^osascript -e 'tell application "System Events" to key code 123'
+    wait-for-log --after $left_before $log 'dupin-trace: key Left '
+    wait-for-log --after $closed_before $log 'dupin-trace: quick-look picker input visible=false key=false'
+    ^osascript -e 'tell application "System Events" to key code 124'
+    snap $out quick-look-restored
 
     let before = poll $out before-return {|r| $r.ok } list-apps
     if (mentions $before Calculator) {
@@ -250,6 +277,91 @@ def scenario [out: path] {
     wait-for-log --after $closed_before $log 'dupin-trace: settings panel closed '
     poll $out settings-from-result $settings list-windows --app Dupin
     snap $out settings-from-result
+
+    system-pane $out $focused $found
+}
+
+def system-pane [out: path, focused: closure, found: closure] {
+    let before = poll $out bluetooth-evidence-before-apps {|r| $r.ok } list-apps
+    if (mentions $before 'System Settings') {
+        error make {
+            msg: 'System Settings was already running; a stale pane could falsely pass'
+        }
+    }
+    ad $out bluetooth-evidence-close-preferences press cmd+w | ignore
+    ad $out bluetooth-evidence-hotkey press alt+space | ignore
+    (poll
+        $out
+        bluetooth-evidence-field
+        $focused
+        find
+        --app
+        Dupin
+        --role
+        textfield
+        --first
+    )
+    ^osascript -e 'tell application "System Events"
+        repeat with typedKey in characters of "bluetooth"
+            keystroke (typedKey as text)
+            delay 0.12
+        end repeat
+    end tell'
+    (poll
+        $out bluetooth-evidence-query
+        {|r| $r.ok and $r.data?.match?.value? == 'bluetooth' }
+        find --app Dupin --role textfield --first
+    )
+    let result = (poll
+        $out bluetooth-evidence-selected-result $found
+        find --app Dupin --name 'Bluetooth System Settings' --exact --first
+    )
+    if $result.data?.match?.ref_id? == null {
+        error make {msg: 'Bluetooth result has no actionable accessibility reference'}
+    }
+    snap $out bluetooth-evidence-before
+    let log = $out | path join dupin.log
+    cp $log ($out | path join bluetooth-evidence-before-trace.log)
+    let failure = try {
+        let activated = (ad
+            $out
+            bluetooth-evidence-activate-result
+            click
+            $result.data.match.ref_id
+        )
+        if not $activated.ok {
+            error make {msg: 'Could not activate the exact Bluetooth launcher result'}
+        }
+        wait-frontmost 'System Settings'
+        let destination = {|r| $r.ok and (
+            $r.data | any {|window| $window.title == 'Bluetooth' and $window.is_focused }
+        ) }
+        (poll
+            $out
+            bluetooth-evidence-destination
+            $destination
+            list-windows
+            --app
+            'System Settings'
+        )
+        snap --app 'System Settings' $out bluetooth-evidence-after
+        null
+    } catch {|error|
+        try { snap --app 'System Settings' $out bluetooth-evidence-failure }
+        $error
+    }
+    let trace_failure = try {
+        cp $log ($out | path join bluetooth-evidence-after-trace.log)
+        null
+    } catch {|error| $error }
+    # The absence check above establishes ownership of this CI-launched app.
+    let cleanup_failure = try {
+        ^osascript -e 'tell application "System Settings" to quit'
+        null
+    } catch {|error| $error }
+    if $failure != null { error make $failure }
+    if $trace_failure != null { error make $trace_failure }
+    if $cleanup_failure != null { error make $cleanup_failure }
 }
 
 # Run agent-desktop, keep its reply in <out>/<name>.json, and return it parsed.
@@ -298,8 +410,8 @@ def mentions [reply: record, name: string]: nothing -> bool {
     $reply.data? | to json --raw | str contains $'"($name)"'
 }
 
-def snap [out: path, name: string] {
-    ad $out $'($name)-snapshot' snapshot --app Dupin | ignore
+def snap [out: path, name: string, --app: string = 'Dupin'] {
+    ad $out $'($name)-snapshot' snapshot --app $app | ignore
     let shot = ^screencapture -x ($out | path join $'($name).png') | complete
     if $shot.exit_code != 0 {
         error make {msg: $"screencapture failed for ($name): ($shot.stderr)"}

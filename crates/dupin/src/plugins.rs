@@ -15,14 +15,69 @@ use dupin_core::{Action, Item, ItemAction};
 use dupin_core::{CommandId, Config, Provider};
 use dupin_core::{ProviderError, Request};
 use dupin_plugin_broker::{PrepareError, PreparedOperation};
-use dupin_plugin_policy::{Access, PluginHandle, Policy};
+use dupin_plugin_policy::{Access, Capability, PluginHandle, Policy, Tier};
 use dupin_plugin_protocol::Operation;
 #[cfg(feature = "wasm-runtime")]
 use dupin_plugin_protocol::{Outcome, VERSION};
 #[cfg(feature = "wasm-runtime")]
 use dupin_plugin_runtime::{GuestModule, HostError, MAX_MODULE_BYTES, QueryControl};
 
-use dupin_plugin_protocol::manifest::{Manifest, ValidatedManifest, validate_catalog};
+use dupin_plugin_protocol::manifest::{CapabilityDescriptor, Manifest, ValidatedManifest, validate_catalog};
+pub fn capability_allowed(capability: &CapabilityDescriptor, settings: &PluginSettings) -> bool {
+    match capability.kind.tier() {
+        Tier::Visible => !settings.revoked.iter().any(|id| id == &capability.id),
+        Tier::Data | Tier::Privileged => settings.grants.iter().any(|id| id == &capability.id),
+    }
+}
+
+pub fn capability_label(capability: &Capability) -> String {
+    match capability {
+        Capability::ClipboardWrite => "Copy to clipboard".into(),
+        Capability::CalendarRead => "Read calendar events".into(),
+        Capability::SystemSleep => "Put the Mac to sleep".into(),
+        Capability::SystemLockScreen => "Lock the screen".into(),
+        Capability::OpenUrl(scope) => format!("Open {}: links", scope.scheme()),
+    }
+}
+
+#[cfg(feature = "wasm-runtime")]
+fn action_label(operation: &Operation) -> String {
+    match operation {
+        Operation::CopyText { text } => {
+            let mut chars = text.chars();
+            let mut preview: String = chars.by_ref().take(32).collect();
+            if chars.next().is_some() {
+                preview.push('…');
+            }
+            format!("Copy “{preview}”")
+        }
+        Operation::OpenUrl { url } => match dupin_plugin_protocol::url_scope::validated_url(url) {
+            Ok(url) => match url.scheme() {
+                "dict" => "Open in Dictionary".into(),
+                "maps" => "Open in Maps".into(),
+                scheme => format!("Open {scheme}: link"),
+            },
+            Err(_) => "Open link".into(),
+        },
+        Operation::SystemCommand { command } => match command {
+            dupin_plugin_protocol::SystemCommand::Sleep => "Sleep Now".into(),
+            dupin_plugin_protocol::SystemCommand::LockScreen => "Lock Screen Now".into(),
+        },
+    }
+}
+
+#[cfg(feature = "wasm-runtime")]
+fn guest_action(command: &CommandId, action: dupin_plugin_protocol::PluginAction) -> ItemAction {
+    ItemAction::new(
+        &action.id,
+        &action_label(&action.operation),
+        Action::Plugin {
+            command: command.clone(),
+            operation: action.operation,
+        },
+    )
+}
+
 pub struct Descriptor {
     manifest: ValidatedManifest,
     backend: Backend,
@@ -85,6 +140,7 @@ pub fn settings(config: &Config, plugin: &Descriptor) -> PluginSettings {
         .unwrap_or_else(|| PluginSettings {
             enabled: plugin.default_enabled,
             grants: Vec::new(),
+            revoked: Vec::new(),
         })
 }
 
@@ -144,7 +200,7 @@ impl Services {
                 policy.set_grant(
                     &entry.handle,
                     capability.kind.clone(),
-                    settings.grants.iter().any(|id| id == &capability.id),
+                    capability_allowed(capability, &settings),
                 );
             }
         }
@@ -196,10 +252,15 @@ impl Services {
             return Err("Undeclared plugin operation.");
         }
         let is_copy = matches!(operation, Operation::CopyText { .. });
+        let is_visible = is_copy || matches!(operation, Operation::OpenUrl { .. });
         PreparedOperation::prepare(&self.policy.lock().unwrap(), &entry.handle, operation).map_err(|error| {
-            match (is_copy, error) {
+            match (is_visible, error) {
                 (true, PrepareError::Access(Access::NeedsGrant)) => {
-                    "Allow this plugin to copy results in Settings → Plugins."
+                    if is_copy {
+                        "Copy is turned off for this plugin in Settings → Plugins."
+                    } else {
+                        "This action is turned off for this plugin in Settings → Plugins."
+                    }
                 }
                 (true, _) => "This action is no longer available.",
                 (false, PrepareError::Access(Access::Disabled | Access::NeedsGrant)) => {
@@ -325,16 +386,7 @@ impl Provider for GuestProvider {
                     actions: item
                         .actions
                         .into_iter()
-                        .map(|action| {
-                            ItemAction::new(
-                                &action.id,
-                                &action.title,
-                                Action::Plugin {
-                                    command: command.clone(),
-                                    operation: action.operation,
-                                },
-                            )
-                        })
+                        .map(|action| guest_action(&command, action))
                         .collect(),
                     completion: None,
                     record_usage: false,
@@ -438,30 +490,66 @@ mod tests {
     }
 
     #[test]
-    fn copying_requires_an_explicit_grant_and_enablement() {
+    fn copy_is_allowed_when_enabled_and_stops_when_revoked_or_disabled() {
         let mut config = Config::default();
         let plugin = &descriptors()[0];
         let command = command_id(plugin);
         let mut services = Services::new(&config);
         let operation = || Operation::CopyText { text: "42".into() };
-        assert!(
-            services
-                .copy(&command, operation(), || true, |_| panic!("no grant"))
-                .is_err()
-        );
-        config.plugins.insert(
-            plugin.id.clone(),
-            PluginSettings {
-                enabled: true,
-                grants: vec!["clipboard-write".into()],
-            },
-        );
-        services.apply_config(&config);
         let mut clipboard = String::new();
         services
             .copy(&command, operation(), || true, |text| clipboard = text.to_owned())
             .unwrap();
         assert_eq!(clipboard, "42");
+        config.plugins.insert(
+            plugin.id.clone(),
+            PluginSettings {
+                enabled: true,
+                grants: vec!["clipboard-write".into()],
+                revoked: vec!["clipboard-write".into()],
+            },
+        );
+        services.apply_config(&config);
+        assert_eq!(
+            services.copy(&command, operation(), || true, |_| panic!("revoked")),
+            Err("Copy is turned off for this plugin in Settings → Plugins.")
+        );
+        config
+            .plugins
+            .get_mut(plugin.id.as_str())
+            .unwrap()
+            .revoked
+            .clear();
+        services.apply_config(&config);
+        let pending = PreparedOperation::prepare(
+            &services.policy.lock().unwrap(),
+            &services.installed[&command].handle,
+            operation(),
+        )
+        .unwrap();
+        config
+            .plugins
+            .get_mut(plugin.id.as_str())
+            .unwrap()
+            .revoked
+            .push("clipboard-write".into());
+        services.apply_config(&config);
+        config
+            .plugins
+            .get_mut(plugin.id.as_str())
+            .unwrap()
+            .revoked
+            .clear();
+        services.apply_config(&config);
+        assert!(
+            pending
+                .dispatch(
+                    &services.policy.lock().unwrap(),
+                    || true,
+                    |_| panic!("stale permit")
+                )
+                .is_err()
+        );
         assert!(
             services
                 .copy(&command, operation(), || false, |_| panic!("cancelled"))
@@ -475,13 +563,131 @@ mod tests {
                 .is_err()
         );
         config.plugins.get_mut(plugin.id.as_str()).unwrap().enabled = true;
-        config.plugins.get_mut(plugin.id.as_str()).unwrap().grants.clear();
+        config
+            .plugins
+            .get_mut(plugin.id.as_str())
+            .unwrap()
+            .revoked
+            .push("clipboard-write".into());
         services.apply_config(&config);
         assert!(
             services
                 .copy(&command, operation(), || true, |_| panic!("revoked"))
                 .is_err()
         );
+    }
+
+    #[test]
+    fn data_access_still_requires_an_explicit_grant() {
+        let capability = CapabilityDescriptor {
+            id: "calendar-read".into(),
+            kind: Capability::CalendarRead,
+        };
+        let mut settings = PluginSettings {
+            enabled: true,
+            grants: vec![],
+            revoked: vec!["calendar-read".into()],
+        };
+        assert!(!capability_allowed(&capability, &settings));
+        let mut policy = Policy::default();
+        let handle = policy.install([Capability::CalendarRead]);
+        policy.set_enabled(&handle, true);
+        policy.set_grant(
+            &handle,
+            capability.kind.clone(),
+            capability_allowed(&capability, &settings),
+        );
+        assert!(matches!(
+            policy.access(&handle, capability.kind.clone()),
+            Access::NeedsGrant
+        ));
+        settings.grants.push("calendar-read".into());
+        assert!(capability_allowed(&capability, &settings));
+        assert_eq!(settings.revoked, ["calendar-read"]);
+    }
+
+    #[test]
+    fn guest_action_title_cannot_rename_the_host_action() {
+        let action = guest_action(
+            &command_id(&descriptors()[0]),
+            dupin_plugin_protocol::PluginAction {
+                id: "copy".into(),
+                title: "Open Safari".into(),
+                operation: Operation::CopyText { text: "3".into() },
+            },
+        );
+        assert_eq!(action.title, "Copy “3”");
+        assert_eq!(
+            action_label(&Operation::CopyText {
+                text: "日".repeat(33)
+            }),
+            format!("Copy “{}…”", "日".repeat(32))
+        );
+    }
+
+    #[test]
+    fn scoped_url_actions_are_visible_but_remain_scoped_and_revocable() {
+        let scope = dupin_plugin_protocol::url_scope::UrlScope::new("https", Some("example.com")).unwrap();
+        let kind = Capability::OpenUrl(scope);
+        let capability = CapabilityDescriptor { id: kind.id(), kind };
+        let mut settings = PluginSettings {
+            enabled: true,
+            ..PluginSettings::default()
+        };
+        assert_eq!(capability_label(&capability.kind), "Open https: links");
+        assert!(capability_allowed(&capability, &settings));
+        let mut policy = Policy::default();
+        let handle = policy.install([capability.kind.clone()]);
+        policy.set_enabled(&handle, true);
+        policy.set_grant(
+            &handle,
+            capability.kind.clone(),
+            capability_allowed(&capability, &settings),
+        );
+        let pending = PreparedOperation::prepare(
+            &policy,
+            &handle,
+            Operation::OpenUrl {
+                url: "https://example.com/".into(),
+            },
+        )
+        .unwrap();
+        assert!(
+            PreparedOperation::prepare(
+                &policy,
+                &handle,
+                Operation::OpenUrl {
+                    url: "https://other.example/".into()
+                }
+            )
+            .is_err()
+        );
+        settings.grants.push(capability.id.clone());
+        settings.revoked.push(capability.id.clone());
+        assert!(!capability_allowed(&capability, &settings));
+        policy.set_grant(
+            &handle,
+            capability.kind.clone(),
+            capability_allowed(&capability, &settings),
+        );
+        settings.revoked.clear();
+        policy.set_grant(
+            &handle,
+            capability.kind.clone(),
+            capability_allowed(&capability, &settings),
+        );
+        assert!(
+            pending
+                .dispatch(&policy, || true, |_| panic!("stale URL permit"))
+                .is_err()
+        );
+        for (url, expected) in [
+            ("dict://word", "Open in Dictionary"),
+            ("maps://?q=London", "Open in Maps"),
+            ("https://example.com/", "Open https: link"),
+        ] {
+            assert_eq!(action_label(&Operation::OpenUrl { url: url.into() }), expected);
+        }
     }
 
     #[test]
@@ -695,9 +901,19 @@ mod native_tests {
             "system".into(),
             PluginSettings {
                 enabled: true,
-                grants: vec!["system-sleep".into()],
+                grants: vec![],
+                revoked: vec!["system-sleep".into()],
             },
         );
+        services.apply_config(&config);
+        assert!(services.prepare(&command, sleep()).is_err());
+        assert!(services.prepare(&command, lock()).is_err());
+        config
+            .plugins
+            .get_mut("system")
+            .unwrap()
+            .grants
+            .push("system-sleep".into());
         services.apply_config(&config);
         assert!(services.prepare(&command, sleep()).is_ok());
         assert!(services.prepare(&command, lock()).is_err());
@@ -783,7 +999,7 @@ mod manifest_tests {
             serde_json::from_slice(include_bytes!("calculator-manifest.json")).unwrap();
         declaration["actions"] = serde_json::json!(["open_url"]);
         declaration["capabilities"] = serde_json::json!([{
-            "id": "open-url:dict:", "title": "Dictionary URLs", "description": "Fixture only",
+            "id": "open-url:dict:",
             "kind": {"open-url": {"scheme": "dict", "host": null}}
         }]);
         let scoped = Manifest::decode(&serde_json::to_vec(&declaration).unwrap()).unwrap();

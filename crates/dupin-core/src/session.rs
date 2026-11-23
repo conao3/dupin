@@ -5,7 +5,7 @@
 use std::collections::{BTreeMap, HashSet, VecDeque};
 
 use crate::searcher::Delivery;
-use crate::{Action, CommandId, CommandRegistry, History, Item};
+use crate::{Action, ActionDisposition, CommandId, CommandRegistry, History, Item, ItemAction};
 
 const QUERY_HISTORY_LIMIT: usize = 100;
 
@@ -240,12 +240,14 @@ impl Session {
         }
     }
 
-    fn activate(&mut self, item: &Item, action: Action) -> Vec<Effect> {
-        if matches!(action, Action::Plugin { .. }) {
-            return vec![Effect::Run(action)];
+    fn activate(&mut self, item: &Item, action: ItemAction) -> Vec<Effect> {
+        if matches!(action.action, Action::Plugin { .. }) {
+            return vec![Effect::Run(action.action)];
         }
-        let mut effects = vec![Effect::Run(action)];
-        effects.extend(self.finish_activation(item));
+        let mut effects = vec![Effect::Run(action.action)];
+        if action.disposition == ActionDisposition::Dismiss {
+            effects.extend(self.finish_activation(item));
+        }
         effects
     }
 
@@ -413,7 +415,7 @@ impl Session {
                         Vec::new()
                     });
                 };
-                let Some(action) = item.action(id).cloned() else {
+                let Some(action) = item.item_action(id).cloned() else {
                     return Some(Vec::new());
                 };
                 let item = item.clone();
@@ -474,7 +476,7 @@ impl Session {
             return Vec::new();
         }
         let item = self.items[self.selected].clone();
-        let Some(action) = item.action(action_id).cloned() else {
+        let Some(action) = item.item_action(action_id).cloned() else {
             return Vec::new();
         };
         self.activate(&item, action)

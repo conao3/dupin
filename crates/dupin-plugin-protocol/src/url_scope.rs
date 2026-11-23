@@ -28,6 +28,10 @@ impl TryFrom<Scope> for UrlScope {
     }
 }
 impl UrlScope {
+    pub fn scheme(&self) -> &str {
+        &self.scheme
+    }
+
     pub fn new(scheme: &str, host: Option<&str>) -> Result<Self, &'static str> {
         let scheme = scheme.to_ascii_lowercase();
         if !matches!(scheme.as_str(), "dict" | "maps" | "http" | "https") {

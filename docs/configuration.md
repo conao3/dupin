@@ -18,7 +18,8 @@ backdrop = "off" # "off", "flow", or the path to a WGSL shader
 
 [plugins.calculator]
 enabled = true # bundled calculator is enabled by default
-grants = [] # add "clipboard-write" only to allow its Copy result action
+grants = [] # explicit allows for data access and privileged operations
+revoked = [] # add "clipboard-write" to turn off copying
 ```
 
 At launch, a parse error makes Dupin use the defaults and report the problem. During a reload, a parse error or unavailable new hotkey keeps the previous configuration. The error appears in Settings and the next time the panel is shown; a reload never opens the panel itself. Fixing the file clears the error. An empty `hotkey` disables the global shortcut.
@@ -31,8 +32,8 @@ Aliases must be non-empty, have no leading or trailing whitespace and leave othe
 
 The bundled calculator runs alongside app search and handles arithmetic and
 unit conversions without a keyword. It needs no permission to calculate. Its
-**Copy results** capability is off by default; grant it in Settings → Plugins →
-Calculator before Enter can copy an answer. Starting Dupin or enabling the
+**Copy to clipboard** action is allowed while Calculator is on. Turn it off in
+Settings → Plugins → Calculator to prevent copying. Starting Dupin or enabling the
 calculator does not request OS access. Currency conversion is not included yet;
 the currency guest in the repository is a test fixture with fixed sample rates.
 
