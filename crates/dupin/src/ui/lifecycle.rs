@@ -78,6 +78,8 @@ impl Ui {
         #[cfg(target_os = "linux")]
         {
             self.focus_lost_until = None;
+            self.focus_wanted_until = Some(tx.clock() + FOCUS_SETTLE);
+            tx.wake_at(tx.clock() + FOCUS_SETTLE);
         }
         if !self.shown && !rune::tooling::is_headless() {
             self.front.capture();
@@ -367,6 +369,7 @@ impl Ui {
 
     #[cfg(target_os = "macos")]
     pub fn focus_changed(&mut self, focused: bool, tx: &mut Tx) {
+        crate::trace::focus(focused);
         if !focused {
             self.dismiss_if_unfocused(tx);
         }
@@ -376,6 +379,10 @@ impl Ui {
     /// focus coming back.
     #[cfg(target_os = "linux")]
     pub fn focus_changed(&mut self, focused: bool, tx: &mut Tx) {
+        crate::trace::focus(focused);
+        if focused {
+            self.focus_wanted_until = None;
+        }
         self.focus_lost_until = (!focused).then(|| tx.clock() + FOCUS_SETTLE);
         if let Some(due) = self.focus_lost_until {
             tx.wake_at(due);
@@ -388,6 +395,17 @@ impl Ui {
             if clock >= due {
                 self.focus_lost_until = None;
                 self.dismiss_if_unfocused(tx);
+            } else {
+                tx.wake_at(due);
+            }
+        }
+        if let Some(due) = self.focus_wanted_until {
+            if clock >= due {
+                self.focus_wanted_until = None;
+                if self.shown {
+                    crate::trace::panel("refocus", self.me.is_visible(), self.shown);
+                    self.me.focus();
+                }
             } else {
                 tx.wake_at(due);
             }

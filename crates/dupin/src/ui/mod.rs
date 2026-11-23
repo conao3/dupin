@@ -144,6 +144,8 @@ pub struct Ui {
     /// losing and gaining focus within a few milliseconds.
     #[cfg(target_os = "linux")]
     focus_lost_until: Option<f64>,
+    #[cfg(target_os = "linux")]
+    focus_wanted_until: Option<f64>,
     /// The input source to put back when the panel hides, if showing it switched one.
     restore_input: Option<crate::platform::input_source::Previous>,
     /// An update was staged while the panel showed: restart into it when the panel hides.
@@ -310,6 +312,8 @@ impl Ui {
             configuration,
             #[cfg(target_os = "linux")]
             focus_lost_until: None,
+            #[cfg(target_os = "linux")]
+            focus_wanted_until: None,
             restore_input: None,
             relaunch: None,
             settings_after_close: false,
