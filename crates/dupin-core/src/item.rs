@@ -12,6 +12,8 @@ pub enum Action {
     /// Open a URL with its registered handler.
     OpenUrl(String),
     Copy(String),
+    /// Show the path in the platform's native preview UI.
+    Preview(PathBuf),
     /// Open the host application's preferences.
     OpenPreferences,
     /// Dispatch an opaque host-owned operation.
@@ -21,11 +23,22 @@ pub enum Action {
     },
 }
 
+/// Whether an item action completes the pick or leaves the current search available.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum ActionDisposition {
+    /// Run the action, record usage and dismiss the launcher.
+    #[default]
+    Dismiss,
+    /// Run the action without recording a pick or dismissing the launcher.
+    KeepOpen,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ItemAction {
     pub id: String,
     pub title: String,
     pub(crate) action: Action,
+    pub(crate) disposition: ActionDisposition,
 }
 
 impl ItemAction {
@@ -34,7 +47,14 @@ impl ItemAction {
             id: id.into(),
             title: title.into(),
             action,
+            disposition: ActionDisposition::Dismiss,
         }
+    }
+
+    /// Leave the current search open after this action runs.
+    pub fn keep_open(mut self) -> Self {
+        self.disposition = ActionDisposition::KeepOpen;
+        self
     }
 }
 
@@ -103,6 +123,10 @@ impl Item {
             .iter()
             .find(|action| action.id == id)
             .map(|action| &action.action)
+    }
+
+    pub fn item_action(&self, id: &str) -> Option<&ItemAction> {
+        self.actions.iter().find(|action| action.id == id)
     }
 }
 

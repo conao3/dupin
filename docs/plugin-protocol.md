@@ -36,10 +36,11 @@ Actions contain an ID, title and a typed `operation`. Operations are `copy_text`
 Unknown operations and command values are rejected. Version 3 deliberately
 replaces version 2; guests must be rebuilt. No executable code, native
 UI objects or arbitrary OS operations are accepted. The host must check the
-plugin's declared and granted capability for that operation at invocation time;
-displaying the action or pressing Enter does not create a grant. Protocol
+plugin's enablement, declared capability and tier-specific access at invocation
+time. Copy is allowed unless revoked; Sleep and Lock require explicit grants.
+The launcher derives labels from the operation rather than the guest's title. Protocol
 validation alone never executes an operation. The calculator declares a primary
-copy action. In the launcher, the broker rechecks its grant and current result
+copy action. In the launcher, the broker rechecks its permit and current result
 before the host clipboard sink runs. The fixture CLI prints the action data and
 does not dispatch it.
 

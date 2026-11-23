@@ -10,7 +10,8 @@ Dupin provides an input field, input routing, result selection, host-rendered vi
 actions and plugin execution. App search, file search and dictionary are still
 native providers; the calculator runs as a bundled Wasm plugin. Currency and
 calendar remain planned plugins. First-party distribution does not give a plugin
-an implicit permission grant.
+an implicit data-access or privileged-operation grant. Visible, declared actions
+are allowed while the plugin is enabled unless the user turns them off.
 
 The everyday experience stays as simple as Alfred: summon, type, choose. Rich
 views appear when a task needs them. Saved snapshots have a separate searchable
@@ -78,9 +79,9 @@ reference plugin use the broker;
 app, file and dictionary providers still access macOS directly. Migration ends
 only when the shell has no feature-specific modes, result kinds or payload fields
 and feature code has no direct OS access outside the broker. An upgrade migration
-must record the enabled state and per-plugin grants for previously available
-app/file/dictionary operations. Settings must show those grants and let the user
-revoke them; global OS consent alone must not create a grant. New permission-
+must preserve the enabled state and visible-action opt-outs for previously available
+app/file/dictionary operations. Settings must show these actions and let the user
+turn them off; global OS consent alone must not create a data grant. New permission-
 dependent capabilities and user-installed plugins start disabled. Bundled
 permission-free plugins may be enabled by default, with their state visible in
 Settings; adding a privileged capability still needs an explicit grant.
@@ -118,7 +119,7 @@ for additional guest operations remain future work.
 
 The [permission policy](plugin-permissions.md) separates plugin grants, OS
 consent and revocable operation permits. Settings stores the calculator's
-enablement and clipboard grant; its copy action is checked by the broker before
+enablement and visible-action opt-outs; its copy action is checked by the broker before
 the host clipboard sink runs. Calendar consent is represented by the policy but
 is not connected to an OS prompt or calendar provider. The native app, file and
 dictionary providers still access macOS directly.
@@ -134,7 +135,7 @@ Enter invokes a declared primary action. Right Arrow and Cmd+K open the shared
 action menu. Dictionary's external-open operation already uses that menu. Privileged host actions are checked when invoked, not trusted
 because they appeared in a rendered result. Enter is not a grant. Open-path
 actions use broker-issued resource handles scoped to that plugin, not arbitrary
-guest paths. URLs require granted schemes/destinations. Clipboard read and write
+guest paths. URLs stay within declared schemes/destinations. Clipboard read and write
 are separate capabilities.
 
 State is bounded, versioned serialisable data held by the host. A snapshot stores
@@ -146,14 +147,17 @@ content, but actions/resume remain inert until their required grants are restore
 
 ## Capabilities and consent
 
-Keep four states distinct: manifest declaration, plugin enabled state, user grant
-and macOS consent. The broker checks them for every host operation.
+Keep declaration, enablement, visible-action opt-outs, data/privileged grants
+and macOS consent distinct. The broker checks them for every host operation.
 
 Permission-dependent plugins are enabled explicitly in Settings or through the
 upgrade migration described above. Enabling alone,
 launching Dupin and opening Settings do not request OS access. An enabled plugin's
 first relevant invocation can request consent through host UI. Settings shows the
-declared capabilities and records per-plugin grants. The first invocation prompts
+declared capabilities and records per-plugin grants for data and privileged access.
+Visible actions such as copying a displayed result are allowed while enabled and
+can be turned off individually. Their labels come from the host operation.
+The first data-access invocation prompts
 macOS only when consent for Dupin has not already been decided. Existing macOS
 consent never substitutes for another plugin's grant. Denial or revocation
 produces an actionable status, without repeated automatic prompts.
@@ -166,8 +170,8 @@ feature-specific parsing, ranking, caching policy and presentation stay in plugi
 
 Network grants constrain destinations and redirects and cap response bytes.
 Resolved loopback and private-network addresses are denied unless explicitly
-granted. Storage is namespaced and bounded. New capabilities from an update stay
-unavailable until approved; the plugin can continue its existing granted
+granted. Storage is namespaced and bounded. New data or privileged capabilities
+from an update stay unavailable until approved; the plugin can continue its existing granted
 operations. A required unavailable capability
 produces an explicit unavailable state rather than an implicit grant.
 Disabling a plugin cancels its work and prevents further broker access. macOS may
@@ -177,7 +181,7 @@ grant access to Dupin globally; each plugin still needs its own grant.
 
 1. Calculator: the bundled Wasm plugin evaluates local expressions and compound
    units without a permission request. It displays a source/result card and offers
-   copy after an explicit Settings grant. The current app-level runtime footprint
+   copy while enabled unless copying is turned off. The current app-level runtime footprint
    measurement is still an adoption gate.
 2. Currency: an offline guest exists as a runtime fixture only. A product plugin
    still needs rate acquisition through constrained HTTP, namespaced persistent
