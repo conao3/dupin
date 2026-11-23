@@ -108,14 +108,21 @@ pub fn parse(text: &str, locale: &Locale, desktops: &[String]) -> Option<Entry> 
         return None;
     }
     let listed = |key: &str| get(key).map(|v| split_list(&unescape(v)));
-    if let Some(only) = listed("OnlyShowIn")
-        && !only.iter().any(|d| desktops.contains(d))
-    {
-        return None;
-    }
-    if let Some(not) = listed("NotShowIn")
-        && not.iter().any(|d| desktops.contains(d))
-    {
+    let only = listed("OnlyShowIn");
+    let not = listed("NotShowIn").unwrap_or_default();
+    let shown = desktops
+        .iter()
+        .find_map(|d| {
+            if only.as_ref().is_some_and(|only| only.contains(d)) {
+                Some(true)
+            } else if not.contains(d) {
+                Some(false)
+            } else {
+                None
+            }
+        })
+        .unwrap_or(only.is_none());
+    if !shown {
         return None;
     }
     if let Some(try_exec) = get("TryExec")
@@ -397,6 +404,23 @@ mod tests {
                 &format!("{base}Type=Application\nNotShowIn=XFCE;\n"),
                 &ja(),
                 &xfce
+            )
+            .is_none()
+        );
+        let gnome_unity = ["GNOME".to_owned(), "Unity".to_owned()];
+        assert!(
+            parse(
+                &format!("{base}Type=Application\nOnlyShowIn=GNOME;\nNotShowIn=Unity;\n"),
+                &ja(),
+                &gnome_unity
+            )
+            .is_some()
+        );
+        assert!(
+            parse(
+                &format!("{base}Type=Application\nOnlyShowIn=Unity;\nNotShowIn=GNOME;\n"),
+                &ja(),
+                &gnome_unity
             )
             .is_none()
         );
