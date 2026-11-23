@@ -33,24 +33,28 @@ pub fn pointer_display_height() -> Option<f64> {
     let pointer = conn.query_pointer(root).ok()?.reply().ok()?;
     let (x, y) = (i32::from(pointer.root_x), i32::from(pointer.root_y));
     let monitors = conn.randr_get_monitors(root, true).ok()?.reply().ok()?;
-    let height = monitors.monitors.iter().find_map(|m| {
+    let monitor = monitors.monitors.iter().find(|m| {
         let (left, top) = (i32::from(m.x), i32::from(m.y));
-        let inside =
-            (left..left + i32::from(m.width)).contains(&x) && (top..top + i32::from(m.height)).contains(&y);
-        inside.then_some(f64::from(m.height))
+        (left..left + i32::from(m.width)).contains(&x) && (top..top + i32::from(m.height)).contains(&y)
     })?;
-    Some(height / scale(&conn, root))
+    let physical = physical_scale(
+        (u32::from(monitor.width), u32::from(monitor.height)),
+        (monitor.width_in_millimeters, monitor.height_in_millimeters),
+    );
+    Some(f64::from(monitor.height) / scale(&conn, root, physical))
 }
 
-/// The scale winit gives X11 windows: `WINIT_X11_SCALE_FACTOR` when it is a number, else
-/// `Xft.dpi` over 96, else 1.
-fn scale(conn: &impl Connection, root: u32) -> f64 {
-    if let Some(factor) = std::env::var("WINIT_X11_SCALE_FACTOR")
-        .ok()
-        .and_then(|v| v.parse::<f64>().ok())
-        .filter(|f| *f > 0.0)
-    {
-        return factor;
+/// The scale winit gives X11 windows: `WINIT_X11_SCALE_FACTOR` when it is a number or
+/// `randr`, else `Xft.dpi` over 96, else the monitor's physical pixel density.
+fn scale(conn: &impl Connection, root: u32, physical: f64) -> f64 {
+    match std::env::var("WINIT_X11_SCALE_FACTOR").ok().as_deref() {
+        Some(v) if v.eq_ignore_ascii_case("randr") => return physical,
+        Some(v) => {
+            if let Some(factor) = v.parse::<f64>().ok().filter(|f| *f > 0.0) {
+                return factor;
+            }
+        }
+        None => {}
     }
     conn.get_property(
         false,
@@ -63,7 +67,19 @@ fn scale(conn: &impl Connection, root: u32) -> f64 {
     .ok()
     .and_then(|cookie| cookie.reply().ok())
     .and_then(|reply| xft_dpi(&String::from_utf8_lossy(&reply.value)))
-    .map_or(1.0, |dpi| dpi / 96.0)
+    .map_or(physical, |dpi| dpi / 96.0)
+}
+
+/// winit's scale from a monitor's size in pixels and millimeters: the pixel density over 96 dpi
+/// in steps of 1/12, at least 1, and 1 for a monitor reporting no size or an implausible one.
+fn physical_scale((width_px, height_px): (u32, u32), (width_mm, height_mm): (u32, u32)) -> f64 {
+    if width_mm == 0 || height_mm == 0 {
+        return 1.0;
+    }
+    let ppmm =
+        ((f64::from(width_px) * f64::from(height_px)) / (f64::from(width_mm) * f64::from(height_mm))).sqrt();
+    let factor = ((ppmm * (12.0 * 25.4 / 96.0)).round() / 12.0).max(1.0);
+    if factor <= 20.0 { factor } else { 1.0 }
 }
 
 fn xft_dpi(resources: &str) -> Option<f64> {
@@ -82,5 +98,12 @@ mod tests {
     fn reads_xft_dpi_from_the_resource_database() {
         assert_eq!(super::xft_dpi("Xft.antialias:\t1\nXft.dpi:\t192\n"), Some(192.0));
         assert_eq!(super::xft_dpi("Xft.antialias:\t1\n"), None);
+    }
+
+    #[test]
+    fn physical_scale_follows_the_monitor_size() {
+        assert_eq!(super::physical_scale((3840, 2160), (508, 286)), 2.0);
+        assert_eq!(super::physical_scale((1920, 1080), (527, 296)), 1.0);
+        assert_eq!(super::physical_scale((1920, 1080), (0, 0)), 1.0);
     }
 }
