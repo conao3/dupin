@@ -312,6 +312,19 @@ impl Ui {
             return;
         }
         match &call.request.command {
+            Command::SnapshotsOpen { .. } if self.picker.is_some() => {
+                call.finish(Err("Busy: picker active".into()));
+            }
+            Command::SnapshotsList {} | Command::SnapshotsOpen { .. } => {
+                self.snapshots.update_if(move |s, _| {
+                    s.control(call);
+                    false
+                });
+            }
+            Command::SnapshotsClose {} => {
+                self.snapshots_after_close = false;
+                self.snapshots.update(move |s, _| s.control_close(call));
+            }
             Command::Open { query } => {
                 if self.picker.is_some() {
                     call.finish(Err("Busy: picker active".into()));
@@ -778,6 +791,8 @@ impl Ui {
 
     pub fn closed(&mut self, _: &mut Tx) {
         crate::trace::panel("closed", self.me.is_visible(), self.shown);
+        let show_snapshots = std::mem::take(&mut self.snapshots_after_close);
+        let show_settings = std::mem::take(&mut self.settings_after_close);
         if std::mem::take(&mut self.accessibility_after_close) {
             let me = self.me.clone();
             std::thread::spawn(move || {
@@ -790,12 +805,16 @@ impl Ui {
                 }
             });
         }
-        if std::mem::take(&mut self.snapshots_after_close) {
-            self.snapshots.open();
+        if show_snapshots {
+            self.snapshots.update(|s, _| s.show());
         }
-        if std::mem::take(&mut self.settings_after_close) {
+        if show_settings {
             crate::trace::settings("panel closed");
             self.prefs.open();
+        }
+        if !show_snapshots && !show_settings && self.relaunch.is_some() {
+            // Rune clears the panel's visibility after this callback.
+            self.me.update(Self::resume_restart);
         }
     }
 
@@ -874,8 +893,25 @@ impl Ui {
         self.timed_notice(message, tx);
     }
 
-    pub fn open_snapshots(&mut self) {
-        self.snapshots.open();
+    pub fn show_snapshots(&mut self, tx: &mut Tx) {
+        if self.me.is_visible() {
+            self.snapshots_after_close = true;
+            self.dismiss(tx);
+        } else {
+            self.snapshots.update(|s, _| s.show());
+        }
+    }
+
+    pub fn control_snapshots_open(&mut self, call: crate::control::Call, tx: &mut Tx) {
+        if call.cancelled.load(Ordering::Relaxed) {
+            return;
+        }
+        if self.picker.is_some() {
+            call.finish(Err("Busy: picker active".into()));
+        } else {
+            self.snapshots.update(move |s, _| s.accept_open(call));
+            self.show_snapshots(tx);
+        }
     }
 
     pub fn resume_snapshot(&mut self, saved: dupin_core::snapshots::Snapshot, tx: &mut Tx) {
@@ -936,8 +972,7 @@ impl Ui {
             return true;
         }
         if ev.mods.cmd && ev.mods.shift && matches!(ev.key, Key::Command('o') | Key::Command('O')) {
-            self.snapshots_after_close = true;
-            self.dismiss(tx);
+            self.show_snapshots(tx);
             return true;
         }
         crate::trace::key(ev);

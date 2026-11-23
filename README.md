@@ -108,5 +108,6 @@ The socket lives in an owner-only Dupin directory under `XDG_RUNTIME_DIR` (or th
 per-user temporary directory on macOS, independent of shell `TMPDIR`). A live instance
 is never replaced; an owner-only socket with no listener is recovered on restart.
 Picker and settings contention return Busy. Disconnecting cancels a pending picker.
-Snapshot window control will be integrated with #32's separate searchable snapshot
-window; the superseded tab proposal is not implemented here.
+Use `dupin snapshots list --json` for saved Snapshot metadata, `dupin snapshots open
+[--id ID]` to show the separate window, and `dupin snapshots close` to hide it.
+See the [Snapshots usage guide](docs/usage.md#snapshots) for details.
