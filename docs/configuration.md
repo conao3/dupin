@@ -42,7 +42,7 @@ the currency guest in the repository is a test fixture with fixed sample rates.
 
 Recent is a native plugin and remains available in builds without calculator
 Wasm support. Showing or opening its suggestions needs no macOS permission;
-**Copy paths** is an optional plugin grant shown under Settings → Plugins →
+Copy path is allowed while Recent is enabled, unless you turn it off in Settings → Plugins →
 Recent. Set this to keep an empty app search blank:
 
 ```toml
