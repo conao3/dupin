@@ -12,8 +12,6 @@
 	"capabilities": [
 		{
 			"id": "clipboard-write",
-			"title": "Copy results",
-			"description": "Allow this plugin to write a result to the clipboard when you choose Copy",
 			"kind": "clipboard-write"
 		}
 	],

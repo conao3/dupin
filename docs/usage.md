@@ -18,6 +18,7 @@ Dupin lives in the background with no Dock icon or menu bar. Its hotkey (⌘Spac
 | ↑ on an empty query, then ↑ ↓           | Recall searches in the current mode                   |
 | ↩                                       | Open the app or file                                  |
 | ⌘↩                                      | Reveal the file in Finder                             |
+| ⌘Y                                      | Preview the selected app or file with Quick Look      |
 | → at the end of the input, ⌘K or Ctrl+K | Show actions for the selected result                  |
 | Esc, or clicking elsewhere              | Hide the panel                                        |
 | ⌘Q                                      | Quit Dupin                                            |
@@ -59,7 +60,7 @@ Set `web_searches` and optional `web_fallbacks` in [configuration](./configurati
 
 ## Maps
 
-Enable **Maps/Places** in Settings → Plugins, then type `maps` or `map` and Space followed by an address or place. Grant **Search in Maps** separately before Enter can open that search in Maps. Without the grant, the query stays in the picker with an explanation.
+Enable **Maps/Places** in Settings → Plugins, then type `maps` or `map` and Space followed by an address or place. Enabling Maps/Places also allows its visible **Open in Maps** action. You can turn off that action separately in Settings → Plugins; when turned off, the query stays in the picker with an explanation.
 
 Searches are handed to Maps when activated. Dupin does not fetch live suggestions or your location while you type. This plugin requires the Wasm-enabled build.
 
@@ -88,17 +89,19 @@ Valid qualifiers appear as inline chips without changing the query text. Backspa
 
 Both modes search the Spotlight index, so they find only what Spotlight has indexed.
 Right Arrow at the end of an unselected input, or Cmd+K, opens the selected
-result's action screen: Open, Reveal in Finder and Copy path. Escape cancels the
+result's action screen: Open, Reveal in Finder, Quick Look and Copy path. Escape cancels the
 screen and returns to the exact search and selection. Use ↑ and ↓ to select an action, Enter to run it, and Left or Escape to return. Ctrl+K also opens actions. The same screen is available for app results.
+
+Quick Look opens the native preview; Escape returns to the picker with its search and selection intact.
 
 `define` or `d` followed by Space switches to Dictionary Services ("Define"). Type a word to see its definition from the dictionaries enabled in Dictionary.app. Right Arrow, Cmd+K, Enter or the Actions link opens its action screen; choose Open in Dictionary to launch the external app. Backspace on an empty query returns to app search. Set `dictionary_keywords` in [configuration](./configuration.md) to choose other aliases.
 
-Dictionary is disabled by default. Enable Dictionary in Settings → Plugins to use its keyword lookups. Grant **Open in Dictionary** separately to use that action; enabling lookup does not grant URL access.
+Dictionary is disabled by default. Enable Dictionary in Settings → Plugins to use its keyword lookups. Enabling Dictionary also allows its visible **Open in Dictionary** action. You can turn off that action separately in Settings → Plugins.
 
 Arithmetic and local unit conversions appear as a source/result card alongside
-app search; no keyword is needed. Enter copies the result only after **Copy
-results** has been granted in Settings → Plugins → Calculator. Without that
-grant, the query remains in place and the panel explains where to enable copying.
+app search; no keyword is needed. Enter copies the result while Calculator is
+enabled. Turn off **Copy to clipboard** in Settings → Plugins → Calculator to
+prevent copying; the query then stays in place with an explanation.
 Currency conversion is not available in the launcher yet.
 
 You can also paste a complete query such as `in release notes` or `d serendipity` into app search. Dupin accepts the same keywords and configured aliases, switches mode, and leaves the search term in the input.

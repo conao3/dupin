@@ -1,6 +1,14 @@
 use super::*;
 use Capability::{CalendarRead, ClipboardWrite};
 
+#[test]
+fn capability_tiers_are_fixed() {
+    assert_eq!(ClipboardWrite.tier(), Tier::Visible);
+    assert_eq!(CalendarRead.tier(), Tier::Data);
+    assert_eq!(Capability::SystemSleep.tier(), Tier::Privileged);
+    assert_eq!(Capability::SystemLockScreen.tier(), Tier::Privileged);
+}
+
 fn permit(policy: &Policy, plugin: &PluginHandle, cap: Capability) -> Permit {
     let Access::Allowed(permit) = policy.access(plugin, cap) else {
         panic!("expected permit");
@@ -186,8 +194,6 @@ fn validated_manifest_update_does_not_grant_new_privileges() {
     policy.set_grant(&handle, Capability::SystemSleep, true);
     manifest.capabilities.push(CapabilityDescriptor {
         id: "system-lock-screen".into(),
-        title: "Lock".into(),
-        description: "Lock the screen".into(),
         kind: Capability::SystemLockScreen,
     });
     let updated = manifest.validate().unwrap();

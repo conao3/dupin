@@ -12,8 +12,6 @@
 	"capabilities": [
 		{
 			"id": "open-url:dict:",
-			"title": "Open in Dictionary",
-			"description": "Open a lookup in Dictionary",
 			"kind": {
 				"open-url": {
 					"scheme": "dict",

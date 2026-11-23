@@ -12,8 +12,6 @@
 	"capabilities": [
 		{
 			"id": "open-url:maps:",
-			"title": "Search in Maps",
-			"description": "Open your entered address or place in Maps",
 			"kind": {
 				"open-url": {
 					"scheme": "maps",

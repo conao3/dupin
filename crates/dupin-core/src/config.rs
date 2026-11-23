@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 pub struct PluginSettings {
     pub enabled: bool,
     pub grants: Vec<String>,
+    pub revoked: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -329,4 +330,15 @@ unexpected = true
             Backdrop::File("~/shaders/waves.wgsl".into())
         );
     }
+}
+#[test]
+fn revoked_actions_round_trip_and_legacy_grants_still_parse() {
+    let config = Config::parse("[plugins.calculator]\nenabled = true\ngrants = [\"clipboard-write\", \"future-data\"]\nrevoked = [\"clipboard-write\", \"future-action\"]").unwrap();
+    let encoded = serde_json::to_string(&config).unwrap();
+    assert_eq!(serde_json::from_str::<Config>(&encoded).unwrap(), config);
+    let legacy =
+        Config::parse("[plugins.calculator]\nenabled = true\ngrants = [\"clipboard-write\"]").unwrap();
+    assert!(legacy.plugins["calculator"].revoked.is_empty());
+    assert_eq!(legacy.plugins["calculator"].grants, ["clipboard-write"]);
+    assert!(Config::parse("[plugins.calculator]\nrefused = []").is_err());
 }

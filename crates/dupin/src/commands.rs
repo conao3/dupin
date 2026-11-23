@@ -324,6 +324,7 @@ mod tests {
             dupin_core::config::PluginSettings {
                 enabled: true,
                 grants: vec![],
+                revoked: vec![],
             },
         );
         let configured = configured(&config).unwrap();
@@ -466,6 +467,7 @@ mod tests {
                 dupin_core::config::PluginSettings {
                     enabled,
                     grants: vec![],
+                    revoked: vec![],
                 },
             );
             let commands = configured(&config).unwrap();
@@ -510,6 +512,7 @@ mod tests {
                 dupin_core::config::PluginSettings {
                     enabled,
                     grants: vec![],
+                    revoked: vec![],
                 },
             );
             let commands = configured(&config).unwrap();
@@ -557,6 +560,7 @@ mod tests {
                 dupin_core::config::PluginSettings {
                     enabled,
                     grants: vec![],
+                    revoked: vec![],
                 },
             );
             let effects = session

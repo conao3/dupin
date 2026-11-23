@@ -18,21 +18,22 @@ backdrop = "off" # "off", "flow", or the path to a WGSL shader
 
 [plugins.calculator]
 enabled = true # bundled calculator is enabled by default
-grants = [] # add "clipboard-write" only to allow its Copy result action
+grants = [] # explicit allows for data access and privileged operations
+revoked = [] # add "clipboard-write" to turn off copying
 ```
 
 At launch, a parse error makes Dupin use the defaults and report the problem. During a reload, a parse error or unavailable new hotkey keeps the previous configuration. The error appears in Settings and the next time the panel is shown; a reload never opens the panel itself. Fixing the file clears the error. An empty `hotkey` disables the global shortcut.
 
 Set `dictionary_keywords` to a list of aliases for Dictionary search. The defaults are `define` and `d`; add, remove or replace entries to suit your workflow. Valid edits take effect without relaunching.
 
-Dictionary is disabled by default. Enable Dictionary in Settings → Plugins to use its keyword lookups. Grant **Open in Dictionary** separately to use that action; enabling lookup does not grant URL access.
+Dictionary is disabled by default. Enable Dictionary in Settings → Plugins to use its keyword lookups. Enabling Dictionary also allows its visible **Open in Dictionary** action. You can turn off that action separately in Settings → Plugins.
 
 Aliases must be non-empty, have no leading or trailing whitespace and leave other commands' keywords, such as `in`, available. Dupin reports invalid or conflicting aliases in the panel and ignores those entries; the other aliases still work.
 
 The bundled calculator runs alongside app search and handles arithmetic and
 unit conversions without a keyword. It needs no permission to calculate. Its
-**Copy results** capability is off by default; grant it in Settings → Plugins →
-Calculator before Enter can copy an answer. Starting Dupin or enabling the
+**Copy to clipboard** action is allowed while Calculator is on. Turn it off in
+Settings → Plugins → Calculator to prevent copying. Starting Dupin or enabling the
 calculator does not request OS access. Currency conversion is not included yet;
 the currency guest in the repository is a test fixture with fixed sample rates.
 
