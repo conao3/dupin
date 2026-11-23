@@ -443,6 +443,7 @@ def file-parent [out: path]: nothing -> string {
 }
 
 def file-search [out: path, query: string, found: closure] {
+    let file = $'($query).dupine2e'
     let log = $out | path join dupin.log
     (poll
         $out
@@ -484,11 +485,11 @@ def file-search [out: path, query: string, found: closure] {
                 delay 0.12
             end repeat
         end tell
-    end run' $query
+    end run' $file
     (poll
         $out
         $'file-actions-($query)-query'
-        {|r| is-focused-query $r $query }
+        {|r| is-focused-query $r $file }
         find
         --app
         Dupin
@@ -522,7 +523,7 @@ def file-search [out: path, query: string, found: closure] {
         --app
         Dupin
         --name
-        $'($query).dupine2e'
+        $file
         --exact
         --first
     ) | ignore
