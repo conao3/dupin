@@ -10,10 +10,12 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 
 use dupin_core::item::Transfer;
+use dupin_core::window_management::Layout as WindowLayout;
 use dupin_core::{
     Backdrop, CommandId, Config, Delivery, DisplaySelection, Effect, History, InputSource, Intent, Position,
     Searcher, Session,
 };
+use dupin_mac::window_management::{self, Error as WindowError};
 use dupin_mac::{
     AppsProvider, AppsWatcher, accessibility, quick_look::Previewer, selection::Selection,
     window::DisplayNotice,
@@ -354,6 +356,11 @@ pub struct Ui {
     settings_after_close: bool,
     snapshots_after_close: bool,
     accessibility_after_close: bool,
+    window_management_enabled: bool,
+    frontmost_pid: Option<i32>,
+    window_action_after_close: Option<(WindowLayout, Option<i32>, Busy)>,
+    window_action_running: bool,
+    pub window_permission_required: bool,
     /// Actions handed to Launch Services that haven't returned yet; a relaunch waits for them.
     running: Arc<AtomicUsize>,
     file_transfers: dupin_mac::file_ops::FileTransfers,
@@ -626,6 +633,11 @@ impl Ui {
             settings_after_close: false,
             snapshots_after_close: false,
             accessibility_after_close: false,
+            window_management_enabled: config.window_management,
+            frontmost_pid: None,
+            window_action_after_close: None,
+            window_action_running: false,
+            window_permission_required: false,
             running,
             file_transfers: dupin_mac::file_ops::FileTransfers::default(),
             updater,
@@ -677,12 +689,17 @@ impl Ui {
             .set_commands(registration.registry)
             .expect("built-in command registration is valid");
         self.registration_notice = registration.notice;
+        let window_management_changed = self.window_management_enabled != config.window_management;
+        self.window_management_enabled = config.window_management;
+        if !config.window_management {
+            self.window_permission_required = false;
+        }
         let is_apps = self.session.command_id().as_str() == crate::commands::APPS;
         let empty = self.session.query().trim().is_empty();
         if !effects.is_empty() {
             self.apply(effects, tx);
         } else if self.session.command().result_limit != previous_limit
-            || (web_changed && is_apps && !empty)
+            || ((web_changed || window_management_changed) && is_apps && !empty)
             || (ranking_changed && self.session.command_id().as_str() == crate::commands::FILES)
             || (recent_changed && is_apps && empty)
             || (clipboard_changed && self.session.command_id().as_str() == crate::commands::CLIPBOARD)
@@ -1012,6 +1029,12 @@ impl Ui {
             self.selection_request = SelectionRequest::Superseded;
         }
         crate::trace::summoned();
+        if self.window_permission_required && accessibility::is_trusted() {
+            self.window_permission_required = false;
+        }
+        if !self.shown && !rune::tooling::is_headless() {
+            self.frontmost_pid = window_management::frontmost_pid();
+        }
         if let Some(problem) = self.backdrop.refresh() {
             crate::log::warn(problem);
         }
@@ -1067,6 +1090,7 @@ impl Ui {
     pub fn open_accessibility_settings(&mut self, tx: &mut Tx) {
         if rune::tooling::is_headless()
             || (!self.selection_permission_required
+                && !self.window_permission_required
                 && self.display_notice != Some(DisplayNotice::AccessibilityRequired))
         {
             return;
@@ -1109,6 +1133,11 @@ impl Ui {
 
     pub fn closed(&mut self, tx: &mut Tx) {
         crate::trace::panel("closed", self.me.is_visible(), self.shown);
+        if let Some((layout, pid, busy)) = self.window_action_after_close.take()
+            && self.window_management_enabled
+        {
+            self.arrange_window(layout, pid, busy);
+        }
         let show_snapshots = std::mem::take(&mut self.snapshots_after_close);
         let show_settings = std::mem::take(&mut self.settings_after_close);
         if std::mem::take(&mut self.accessibility_after_close) {
@@ -1997,6 +2026,12 @@ impl Ui {
                     dupin_core::Action::Copy(text) => tx.copy(text),
                     dupin_core::Action::Snippet { text, paste } => self.run_snippet(text, paste, tx),
                     dupin_core::Action::OpenPreferences => self.prepare_settings(),
+                    dupin_core::Action::ArrangeWindow(layout) => {
+                        if self.window_management_enabled && !rune::tooling::is_headless() {
+                            self.window_action_after_close =
+                                Some((layout, self.frontmost_pid, Busy::new(self.running.clone())));
+                        }
+                    }
                     dupin_core::Action::Preview(path) => {
                         let shown = self
                             .quick_look
@@ -2183,6 +2218,40 @@ impl Ui {
             if let Err(error) = dupin_mac::workspace::run(&action) {
                 me.update(move |ui, tx| ui.show_notice(error, tx));
             }
+            drop(busy);
+        });
+    }
+
+    fn arrange_window(&mut self, layout: WindowLayout, pid: Option<i32>, busy: Busy) {
+        let me = self.me.clone();
+        if self.window_action_running {
+            me.update(|ui, tx| ui.show_notice("A window command is already running.".into(), tx));
+            return;
+        }
+        self.window_action_running = true;
+        let displays = window_management::displays();
+        std::thread::spawn(move || {
+            let result = pid
+                .ok_or(WindowError::NoWindow)
+                .and_then(|pid| window_management::arrange(pid, layout, &displays));
+            me.update(move |ui, tx| {
+                ui.window_action_running = false;
+                ui.window_permission_required = ui.window_management_enabled
+                    && matches!(
+                        result,
+                        Err(WindowError::PermissionRequested | WindowError::PermissionRequired)
+                    )
+                    && !accessibility::is_trusted();
+                if !ui.window_management_enabled || ui.picker.is_some() {
+                    return;
+                }
+                match result {
+                    Err(WindowError::PermissionRequired) if ui.window_permission_required => ui.show(tx),
+                    Err(WindowError::PermissionRequested | WindowError::PermissionRequired) => {}
+                    Err(error) => ui.show_notice(error.message().into(), tx),
+                    Ok(()) => {}
+                }
+            });
             drop(busy);
         });
     }

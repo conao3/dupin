@@ -23,6 +23,7 @@ pub(super) const ENTRIES: &[Entry] = &[
             "focused window display",
             "selected-text search",
             "snippet pasting",
+            "window management",
         ],
     },
     Entry {

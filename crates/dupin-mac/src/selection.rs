@@ -40,11 +40,12 @@ fn selected_text() -> Option<String> {
     }
     let focused = accessibility::attribute(&system, "AXFocusedUIElement");
     accessibility::set_timeout(&system, 0.0);
-    let focused = focused?;
+    let focused = focused.ok()?;
     if !accessibility::set_timeout(&focused, 0.12) {
         return None;
     }
-    let text = accessibility::attribute(&focused, "AXSelectedText")?
+    let text = accessibility::attribute(&focused, "AXSelectedText")
+        .ok()?
         .downcast::<CFString>()
         .ok()?;
     Some(text.to_string())

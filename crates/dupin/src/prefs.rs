@@ -1076,6 +1076,13 @@ fn search(s: &Prefs, k: &Kit) -> Vec<El> {
         .disabled(s.read_only)
         .on_toggle(move |s: &mut Prefs| s.set(|c| c.snippet_paste = next_paste))
         .build(k);
+    let enabled = s.config.window_management;
+    let window_management = Switch::new(enabled)
+        .label("Window Management")
+        .hide_label()
+        .disabled(s.read_only)
+        .on_toggle(move |s: &mut Prefs| s.set(|c| c.window_management = !enabled))
+        .build(k);
     let mut rows = vec![
         setting(
             k,
@@ -1111,6 +1118,13 @@ fn search(s: &Prefs, k: &Kit) -> Vec<El> {
             "Paste snippets",
             Some("Enter pastes a snippet into the front app instead of only copying it"),
             paste,
+        ),
+        setting(
+            k,
+            &icons::PANEL,
+            "Window Management",
+            Some("Show commands to move and resize windows. Requires Accessibility on first use."),
+            window_management,
         ),
     ];
     // Checking doesn't ask macOS for access; only pasting a snippet does.

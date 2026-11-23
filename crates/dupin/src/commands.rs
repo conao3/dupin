@@ -24,6 +24,7 @@ const BROWSE: &str = "files.browse";
 const SETTINGS: &str = "settings.search";
 const WEB_KEYWORDS: &str = "web.keywords";
 const WEB_FALLBACKS: &str = "web.fallbacks";
+const WINDOWS: &str = "windows.arrange";
 const MAX_FILE_CANDIDATES: usize = 10_000;
 
 pub struct Registration {
@@ -231,6 +232,14 @@ pub fn configured(config: &Config) -> Result<ConfiguredCommands, dupin_core::Com
         )?;
         default_providers.push(recent);
     }
+    if config.window_management {
+        registry.register(CommandSpec::new(
+            id(WINDOWS),
+            crate::window_management::COMMANDS.len(),
+            presentation("Arrange windows", None, None, None, false, 0.0),
+        ))?;
+        default_providers.push(id(WINDOWS));
+    }
     registry.set_default_providers(default_providers, Some(id(WEB_KEYWORDS)))?;
 
     registry.set_browser(id(BROWSE))?;
@@ -345,6 +354,10 @@ pub fn register(
             Arc::new(dupin_mac::SettingsProvider::default()) as Arc<dyn Provider>,
         ),
         (
+            id(WINDOWS),
+            Arc::new(crate::window_management::WindowProvider) as Arc<dyn Provider>,
+        ),
+        (
             files_id,
             Arc::new(SpotlightProvider::with_demotions(
                 Target::Names,
@@ -396,6 +409,50 @@ pub fn register(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn window_commands_follow_the_live_opt_in_and_run_through_the_session() {
+        use dupin_core::window_management::Layout;
+        use dupin_core::{Action, Delivery, Effect, History, Intent, Request, Session};
+
+        let mut config = Config::parse("").unwrap();
+        assert!(!config.window_management);
+        let mut session = Session::new(History::default(), configured(&config).unwrap().registry).unwrap();
+        let windows = id(WINDOWS);
+        let searches_windows =
+            |effect: &Effect| matches!(effect, Effect::Search { command, .. } if command == &windows);
+        assert!(!session.set_query("left half").iter().any(searches_windows));
+
+        config = Config::parse("window_management = true").unwrap();
+        session
+            .set_commands(configured(&config).unwrap().registry)
+            .unwrap();
+        let generation = session
+            .refresh()
+            .into_iter()
+            .find_map(|effect| match effect {
+                Effect::Search {
+                    command, generation, ..
+                } if command == windows => Some(generation),
+                _ => None,
+            })
+            .unwrap();
+        let mut items = Vec::new();
+        crate::window_management::WindowProvider
+            .search(&Request::detached("left half", 10), &mut |batch| {
+                items.extend(batch)
+            })
+            .unwrap();
+        session.deliver_from(windows.clone(), Delivery::Batch { generation, items });
+        let effects = session.intent(Intent::Open).unwrap();
+        assert!(effects.contains(&Effect::Run(Action::ArrangeWindow(Layout::LeftHalf))));
+        assert!(effects.contains(&Effect::Hide));
+
+        session
+            .set_commands(configured(&Config::default()).unwrap().registry)
+            .unwrap();
+        assert!(!session.set_query("left half").iter().any(searches_windows));
+    }
 
     #[test]
     fn recent_is_the_only_blank_search_provider_and_can_be_disabled() {

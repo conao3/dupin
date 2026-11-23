@@ -18,6 +18,7 @@ dictionary_keywords = ["define", "d"] # type any keyword, then Space, to look up
 display = "mouse" # "mouse", "main", or "active"
 snippet_keywords = ["snip"] # type any keyword, then Space, to search snippets
 snippet_paste = false # whether Enter on a snippet also pastes it into the front app
+window_management = false # show commands to move and resize windows in normal search
 position = "center" # "center" puts the field at the middle of the display; "top" near its top
 input_source = "ascii" # "ascii", "keep", or an input source identifier such as "com.apple.keylayout.ABC"
 auto_update = true # whether a release build checks for and installs its channel's updates by itself

@@ -49,6 +49,7 @@ pub enum Action {
     OpenPreferences,
     ScriptArguments(PathBuf),
     RunScript(crate::script::ScriptRun),
+    ArrangeWindow(crate::window_management::Layout),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

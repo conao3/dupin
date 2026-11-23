@@ -26,6 +26,7 @@ pub mod spotlight;
 pub mod system_hotkey;
 pub mod watcher;
 pub mod window;
+pub mod window_management;
 pub mod workspace;
 
 pub use apps::{AppsProvider, AppsWatcher};

@@ -1,16 +1,13 @@
-use std::ffi::c_void;
 use std::ptr::{self, NonNull};
 
-use objc2_core_foundation::{CFArray, CFGetTypeID, CFRetained, CFString, CFType, CFTypeID};
-use objc2_foundation::{NSPoint, NSRect, NSSize};
+use objc2_core_foundation::{CFArray, CFRetained, CFString, CFType};
+use objc2_foundation::NSRect;
 
-use crate::accessibility;
+use crate::accessibility::{self, read_frame};
 
 // The launcher waits for two messages before it can open on the chosen display.
 const MESSAGING_TIMEOUT_SECONDS: f32 = 0.020;
 const STOP_ON_ERROR: u32 = 1;
-const AX_POINT: u32 = 1;
-const AX_SIZE: u32 = 2;
 
 #[link(name = "ApplicationServices", kind = "framework")]
 unsafe extern "C" {
@@ -20,13 +17,11 @@ unsafe extern "C" {
         options: u32,
         values: &mut *mut CFArray<CFType>,
     ) -> i32;
-    fn AXValueGetTypeID() -> CFTypeID;
-    fn AXValueGetValue(value: &CFType, kind: u32, out: *mut c_void) -> u8;
 }
 
 pub(crate) fn frame(pid: i32) -> Option<NSRect> {
     let app = timed(accessibility::application(pid)?)?;
-    let window = accessibility::attribute(&app, "AXFocusedWindow")?;
+    let window = accessibility::attribute(&app, "AXFocusedWindow").ok()?;
     let window = timed(window)?;
     let attributes =
         CFArray::from_objects(&[&*CFString::from_str("AXPosition"), &*CFString::from_str("AXSize")]);
@@ -46,22 +41,6 @@ pub(crate) fn frame(pid: i32) -> Option<NSRect> {
 fn timed(element: CFRetained<CFType>) -> Option<CFRetained<CFType>> {
     // Bound calls to the foreground app without changing the process-wide timeout.
     accessibility::set_timeout(&element, MESSAGING_TIMEOUT_SECONDS).then_some(element)
-}
-
-fn read_frame(position: &CFType, size: &CFType) -> Option<NSRect> {
-    // SAFETY: Check both CF types before passing them to AXValueGetValue.
-    let value_type = unsafe { AXValueGetTypeID() };
-    if CFGetTypeID(Some(position)) != value_type || CFGetTypeID(Some(size)) != value_type {
-        return None;
-    }
-    let mut origin = NSPoint::ZERO;
-    let mut dimensions = NSSize::ZERO;
-    // SAFETY: AXValueGetValue checks the requested kind and writes only its corresponding type.
-    unsafe {
-        (AXValueGetValue(position, AX_POINT, ptr::from_mut(&mut origin).cast()) != 0
-            && AXValueGetValue(size, AX_SIZE, ptr::from_mut(&mut dimensions).cast()) != 0)
-            .then_some(NSRect::new(origin, dimensions))
-    }
 }
 
 #[cfg(test)]

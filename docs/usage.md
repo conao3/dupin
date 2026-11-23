@@ -71,6 +71,22 @@ Turn on clipboard history in Settings → Search (it is off by default; see [con
 
 The action screen (→, ⌘K or Ctrl+K) offers Copy, Delete from History and Clear History. Deleting removes that entry only; the clipboard itself keeps whatever it holds. Clear History asks for confirmation with Cancel selected before forgetting every entry. Clipboard results can't be saved as snapshots and are not recorded in usage-ranking history.
 
+## Window management
+
+Turn on **Window Management** in Settings → Search, then type `window` or a
+command name such as `Left Half`, `Centre Third` or `Maximise`. Enter hides
+Dupin and arranges the focused window of the app that was frontmost when you
+opened the panel.
+
+Halves, thirds and Maximise use the display’s usable area, outside the Dock
+and menu bar. Centre keeps the current size where it fits. Next Display
+cycles through displays, keeping the window’s relative placement and shrinking
+it only if it is too large for the destination.
+
+Dupin requests Accessibility access on the first command that needs it.
+If access is missing, choose **Open Accessibility Settings** in the panel,
+allow Dupin and run the command again.
+
 ## Snapshots
 
 Press ⌘⇧S in the launcher to save a finished calculation, search or extension view.
