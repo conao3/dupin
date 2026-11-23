@@ -65,9 +65,18 @@ command = "dupin open --query 'gh '"
 
 Dupin runs commands in the background from your home directory using `$SHELL -lc` (with `/bin/zsh` as the fallback). Standard input is closed. Successful commands run silently. On failure, Dupin shows a notice with the error or exit status and up to four lines from the end of stderr. Up to four commands can run at a time.
 
-Dupin stops active command groups after five minutes or when it quits or relaunches. A background job can keep running after its shell exits. Redirect that job's standard error if it needs to keep writing after Dupin quits.
+Commands run until they exit or Dupin quits or relaunches. Automatic updates can restart Dupin while commands are running. If all four slots are in use, wait for a command to finish or quit and reopen Dupin to clear the slots. A background job can keep running after its shell exits, which frees the command slot. Redirect that job's standard error if it needs to keep writing after Dupin quits.
 
-Each shortcut must be distinct from the panel and selection shortcuts and other bindings. Edits reload automatically. Dupin reports clashes in Settings and in the panel, keeping the active shortcuts.
+A [script binding](./scripts.md#hotkeys) uses the executable's filename, including its extension, and can pass an array of arguments.
+
+```toml
+[bindings."alt+cmd+t"]
+target = "script"
+script = "echo-message.sh"
+args = ["Hello from Dupin"]
+```
+
+Each shortcut must be distinct from the panel and selection shortcuts and other bindings. Settings → General lists the configured bindings. Edits reload automatically. Dupin reports clashes and invalid script bindings in Settings and in the panel. If the script is missing, unavailable or its arguments are invalid, Dupin skips that binding and applies the rest of the configuration. Fixing the script or binding makes the shortcut available automatically.
 
 ## Web searches
 

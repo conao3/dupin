@@ -91,12 +91,15 @@ fn resolve_with(path: &Path, mut visit: impl FnMut(&Path)) -> std::io::Result<Pa
 
 /// The config, or the defaults with a message saying why the file wasn't used.
 pub fn load() -> (Config, Option<String>) {
-    let Some(path) = path() else {
-        return (Config::default(), None);
-    };
-    let src = match read_source(&path) {
+    path().map_or_else(|| (Config::default(), None), |path| load_from(&path))
+}
+
+fn load_from(path: &Path) -> (Config, Option<String>) {
+    let src = match read_source(path) {
         Ok(src) => src,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return (Config::default(), None),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return (Config::default(), None);
+        }
         Err(e) => {
             return problem(format!(
                 "couldn't read {}: {e}; using the defaults",
@@ -106,10 +109,10 @@ pub fn load() -> (Config, Option<String>) {
     };
     match Config::parse(&src) {
         Ok(config) => (config, None),
-        Err(e) => problem(format!(
+        Err(error) => problem(format!(
             "{} is invalid, using the defaults: {}",
             path.display(),
-            e.message()
+            error.message()
         )),
     }
 }
@@ -196,6 +199,22 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn loads_config_with_a_missing_script_binding_at_startup() {
+        let dir = scratch("missing-script");
+        let path = dir.join("config.toml");
+        let source = r#"
+file_limit = 37
+[bindings."alt+cmd+t"]
+target = "script"
+script = "missing.sh"
+"#;
+        std::fs::write(&path, source).unwrap();
+
+        assert_eq!(load_from(&path), (Config::parse(source).unwrap(), None));
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

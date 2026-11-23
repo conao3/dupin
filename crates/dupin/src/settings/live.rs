@@ -490,6 +490,39 @@ mod tests {
     }
 
     #[test]
+    fn reload_and_settings_save_keep_a_missing_script_binding() {
+        let root = TempDir::new();
+        let config_path = root.path().join("config.toml");
+        let source = r#"
+file_limit = 37
+[bindings."alt+cmd+t"]
+target = "script"
+script = "missing.sh"
+"#;
+        fs::write(&config_path, source).unwrap();
+        let (updates, receiver) = mpsc::channel();
+        let service = Service::new(Some(config_path.clone()), move |update| {
+            updates.send(update).unwrap()
+        });
+        send_changed(&service);
+        let config = Config::parse(source).unwrap();
+        assert_eq!(receive_revision(&receiver, 0).result.unwrap(), config);
+
+        let desired = Config {
+            file_limit: 58,
+            ..config.clone()
+        };
+        let revision = service.save(&config, &desired).unwrap();
+        let saved = receive_revision(&receiver, revision);
+        assert!(saved.save_problem.is_none());
+        assert_eq!(saved.result.unwrap(), desired);
+        assert_eq!(
+            Config::parse(&fs::read_to_string(config_path).unwrap()).unwrap(),
+            desired
+        );
+    }
+
+    #[test]
     fn queued_saves_keep_order_for_a_single_merged_write() {
         let (sender, receiver) = mpsc::channel();
         sender

@@ -66,6 +66,11 @@ pub enum HotkeyTarget {
     Command {
         command: String,
     },
+    Script {
+        script: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        args: Vec<String>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]

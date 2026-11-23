@@ -186,6 +186,7 @@ pub struct Prefs {
     permissions: Vec<Access>,
     /// The first-run welcome's step while it covers the pages.
     welcome: Option<welcome::Step>,
+    pub(crate) hotkey_problem: Option<String>,
     pub(crate) scripts_notice: Option<String>,
     preview_dark: Option<bool>,
     active_radius: u16,
@@ -245,6 +246,7 @@ impl Prefs {
             read_only: crate::settings::read_only(),
             settings,
             config_problem: None,
+            hotkey_problem: None,
             scripts_notice: None,
             login: objc2::MainThreadMarker::new()
                 .and_then(LoginItem::for_current_app)
@@ -625,20 +627,44 @@ pub fn view(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
                 .scroll(ScrollSpec { stick_bottom: false })
                 .px(GUTTER - ROW_PX)
                 .gap(12.0)
-                .children(s.config_problem.as_ref().map(|problem| {
-                    text(problem)
-                        .key("config-problem")
-                        .w_full()
-                        .font(DESCRIPTION)
-                        .color(k.c.text_base)
-                        .wrap()
-                }))
+                .children(
+                    [
+                        ("config-problem", s.config_problem.as_deref()),
+                        ("hotkey-problem", s.hotkey_problem.as_deref()),
+                    ]
+                    .into_iter()
+                    .filter_map(|(key, problem)| Some((key, problem?)))
+                    .map(|(key, problem)| {
+                        text(problem)
+                            .key(key)
+                            .w_full()
+                            .font(DESCRIPTION)
+                            .color(k.c.text_base)
+                            .wrap()
+                    }),
+                )
                 .children(
                     if s.welcome.is_some() || matches!(s.page, Page::Appearance | Page::Permissions) {
                         rows
                     } else {
                         vec![card(k, hair, rows)]
                     },
+                )
+                .children(
+                    (s.welcome.is_none() && s.page == Page::General && !s.config.bindings.is_empty()).then(
+                        || {
+                            col()
+                                .key("configured-hotkeys")
+                                .gap(4.0)
+                                .child(
+                                    text("Configured hotkeys")
+                                        .mx(ROW_PX)
+                                        .font(k.ty.body_medium)
+                                        .color(k.c.text_base),
+                                )
+                                .child(card(k, hair, configured_hotkeys(s, k)))
+                        },
+                    ),
                 )
                 .children(
                     s.scripts_notice
@@ -948,6 +974,33 @@ fn general(s: &Prefs, k: &Kit) -> Vec<El> {
             relaunch,
         ),
     ]
+}
+
+fn configured_hotkeys(s: &Prefs, k: &Kit) -> Vec<El> {
+    use dupin_core::config::HotkeyTarget;
+
+    s.config
+        .bindings
+        .iter()
+        .map(|(chord, target)| {
+            let keys = chord
+                .parse::<Shortcut>()
+                .map_or_else(|_| chord.clone(), |shortcut| shortcut.keycaps().join(""));
+            let (kind, name) = match target {
+                HotkeyTarget::App { bundle_id, .. } => ("App", bundle_id),
+                HotkeyTarget::Command { command } => ("Command", command),
+                HotkeyTarget::Script { script, .. } => ("Script", script),
+            };
+            setting(
+                k,
+                &icons::KEYBOARD,
+                kind,
+                Some(name),
+                text(keys).font(k.ty.ui).color(k.c.text_base),
+            )
+            .key(chord)
+        })
+        .collect()
 }
 
 fn login_setting(login: Option<&LoginPreference>, k: &Kit) -> El {
