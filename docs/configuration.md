@@ -18,7 +18,7 @@ auto_update = true # whether a release build checks for and installs its channel
 backdrop = "off" # "off", "flow", or the path to a WGSL shader
 ```
 
-At launch, a parse error makes Dupin use the defaults and report the problem. During a reload, a parse error or unavailable new hotkey keeps the previous configuration. The error appears in Settings and the next time the panel is shown; a reload never opens the panel itself. Fixing the file clears the error. An empty `hotkey` disables the global shortcut.
+At launch, a parse error makes Dupin use the defaults and report the problem. During a reload, a parse error or unavailable new hotkey keeps the previous configuration. The error appears in Settings and the next time the panel is shown; a reload never opens the panel itself. Fixing the file clears the error. An empty `hotkey` disables the panel shortcut.
 
 Set `dictionary_keywords` to a list of aliases for Dictionary search. The defaults are `define` and `d`; add, remove or replace entries to suit your workflow. Valid edits take effect without relaunching.
 
@@ -31,6 +31,19 @@ In Settings → General → Display, choose Mouse pointer (`"mouse"`, the defaul
 ## Launch at login
 
 In Settings → General, turn **Launch at login** on or off. If macOS requires approval, choose **Open Login Items** and allow Dupin in System Settings. Dupin refreshes the status when you return. This setting is managed by macOS and is available in the signed app bundle outside the Nix store.
+
+## App hotkeys
+
+Add a table to `config.toml` for each shortcut, using the app's macOS bundle identifier.
+
+```toml
+[bindings."ctrl+alt+c"]
+target = "app"
+bundle_id = "com.apple.calculator"
+hide_if_frontmost = true # optional, defaults to false
+```
+
+Each shortcut must be distinct from the panel shortcut and other bindings. Edits reload automatically. Dupin reports clashes in Settings and in the panel, keeping the active shortcuts.
 
 ## Web searches
 
