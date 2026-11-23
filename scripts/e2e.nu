@@ -7,7 +7,7 @@
 
 use e2e-recording.nu record
 use e2e-state.nu is-focused-query
-use e2e-file-fixtures.nu [prepare cleanup]
+use e2e-file-fixtures.nu [prepare cleanup viewer-running readable-trash]
 
 # Run the scenario against `app`, keeping each step's last agent-desktop reply, a snapshot and a
 # screenshot per stage, and Dupin's log in `out`.
@@ -30,9 +30,12 @@ def "main run" [app: path, --out: path = 'target/e2e', --record] {
         error make {msg: $"not granted: ($denied.permission | str join ', ')"}
     }
 
-    let before = ad $out file-actions-before-apps list-apps
-    if not $before.ok or (mentions $before DupinE2EViewer) {
+    if (viewer-running) {
         error make {msg: 'Cannot establish ownership of the file-action viewer'}
+    }
+    readable-trash
+    if ($out | path join fixtures | path exists) {
+        error make {msg: 'File-action fixtures already exist'}
     }
     if (glob ($env.HOME | path join '.Trash/trash-me*.dupine2e') | is-not-empty) {
         error make {msg: 'File-action Trash fixtures already exist'}
@@ -82,7 +85,7 @@ def "main run" [app: path, --out: path = 'target/e2e', --record] {
     if (open --raw $log | lines | any {|line| $line =~ '^dupin: backdrop (shader|pipeline)' }) {
         error make {msg: $"the backdrop shader failed; see ($log)"}
     }
-    print 'e2e: Quick Look returned to the query, the panel opened Calculator, Dupin Settings and the Bluetooth pane'
+    print 'e2e: Quick Look restored the query; Calculator, Settings, Bluetooth, Open with… and confirmed Trash passed'
 }
 
 def scenario [out: path] {
@@ -339,14 +342,9 @@ def file-actions-stage [out: path, found: closure] {
         wait-condition 'fixture application opening the exact path' {
             ($marker | path exists) and (open $marker) == [$open_path]
         }
-        snap --app DupinE2EViewer $out file-actions-opened
+        snap $out file-actions-opened
         ^osascript -e 'tell application id "org.dupin.e2e.viewer" to quit'
-        (poll
-            $out
-            file-actions-viewer-closed
-            {|r| $r.ok and not (mentions $r DupinE2EViewer) }
-            list-apps
-        ) | ignore
+        wait-condition 'fixture viewer quitting' { not (viewer-running) }
 
         file-search $out trash-me $found
         ^osascript -e 'tell application "System Events"
@@ -431,13 +429,17 @@ def file-actions-stage [out: path, found: closure] {
 }
 
 def file-row-name [out: path, name: string]: nothing -> string {
+    $'($name).dupine2e (file-parent $out)'
+}
+
+def file-parent [out: path]: nothing -> string {
     let parent = $out | path join fixtures
     let parent = if ($parent | str starts-with $env.HOME) {
         $parent | str replace $env.HOME '~'
     } else {
         $parent
     }
-    $'($name).dupine2e ($parent)'
+    $parent
 }
 
 def file-search [out: path, query: string, found: closure] {
@@ -445,7 +447,7 @@ def file-search [out: path, query: string, found: closure] {
     (poll
         $out
         $'file-actions-($query)-apps'
-        {|r| $r.ok and not (mentions $r 'System Settings') and not (mentions $r DupinE2EViewer) }
+        {|r| $r.ok and not (mentions $r 'System Settings') }
         list-apps
     ) | ignore
     ad $out $'file-actions-($query)-summon' press alt+space | ignore
@@ -524,7 +526,7 @@ def file-search [out: path, query: string, found: closure] {
         --exact
         --first
     ) | ignore
-    let parent = $out | path join fixtures | str replace $env.HOME '~'
+    let parent = file-parent $out
     (poll
         $out
         $'file-actions-($query)-context-path'

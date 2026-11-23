@@ -1,5 +1,23 @@
 const registration = '/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister'
 
+export def viewer-running []: nothing -> bool {
+    let process = ^pgrep -f 'DupinE2EViewer.app/Contents/MacOS/viewer' | complete
+    match $process.exit_code {
+        0 => true
+        1 => false
+        _ => { error make {msg: 'Could not check the fixture viewer process'} }
+    }
+}
+
+export def readable-trash [] {
+    let result = ^ls -A ($env.HOME | path join .Trash) | complete
+    if $result.exit_code != 0 {
+        error make {
+            msg: 'Cannot read the disposable runner Trash; file-action verification requires access'
+        }
+    }
+}
+
 export def prepare [out: path] {
     let root = $out | path join fixtures
     if ($root | path exists) { error make {msg: 'File-action fixtures already exist'} }
@@ -24,13 +42,32 @@ export def prepare [out: path] {
 
 export def cleanup [out: path] {
     let bundle = $out | path join fixtures DupinE2EViewer.app
-    ^osascript -e 'if application id "org.dupin.e2e.viewer" is running then tell application id "org.dupin.e2e.viewer" to quit'
-    ^$registration -u $bundle
-    let expected = open --raw ($out | path join fixtures trash.sha256)
-    for path in (glob ($env.HOME | path join '.Trash/trash-me*.dupine2e')) {
-        if (open --raw $path | hash sha256) != $expected {
-            error make {msg: 'Refusing to remove an unexpected Trash item'}
-        }
-        rm $path
+    let failures = [
+        (try {
+            if (viewer-running) {
+                ^osascript -e 'tell application id "org.dupin.e2e.viewer" to quit'
+            }
+            null
+        } catch {|error| $error })
+        (try {
+            ^$registration -u $bundle
+            null
+        } catch {|error|
+            $error
+        })
+        (try {
+            readable-trash
+            for path in (glob ($env.HOME | path join '.Trash/trash-me*.dupine2e')) {
+                let expected = open --raw ($out | path join fixtures trash.sha256)
+                if (open --raw $path | hash sha256) != $expected {
+                    error make {msg: 'Refusing to remove an unexpected Trash item'}
+                }
+                rm $path
+            }
+            null
+        } catch {|error| $error })
+    ] | where {|error| $error != null }
+    if ($failures | is-not-empty) {
+        error make ($failures | first)
     }
 }
