@@ -50,6 +50,11 @@ objc2-app-kit = { workspace = true, features = [
 	"libc",
 ] }
 objc2-quick-look-ui = { workspace = true }
+objc2-service-management = { workspace = true, features = [
+	"objc2",
+	"objc2-foundation",
+	"SMAppService",
+] }
 
 objc2-core-foundation = { workspace = true, features = [
 	"std",

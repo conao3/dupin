@@ -11,6 +11,7 @@ pub mod file_actions;
 pub mod file_ops;
 pub mod font;
 pub mod input_source;
+pub mod login_item;
 pub mod quick_look;
 mod settings_search;
 pub mod spotlight;

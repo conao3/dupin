@@ -95,7 +95,10 @@ fn main() {
     .windowless()
     .on_window(|_| trace::settings("created"))
     .on_ready(|_| trace::settings("ready"))
-    .on_focus(|_, focused, _| {
+    .on_focus(|s, focused, _| {
+        if focused {
+            s.refresh_login_item();
+        }
         trace::settings(if focused { "focused" } else { "unfocused" });
     })
     .on_close(prefs::Prefs::closed);
