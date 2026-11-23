@@ -14,7 +14,7 @@ use dupin_core::config::PluginSettings;
 use dupin_core::{Action, Item, ItemAction, ProviderError, Request};
 use dupin_core::{CommandId, Config, Provider};
 use dupin_plugin_broker::{PrepareError, PreparedCopy};
-use dupin_plugin_policy::{Access, Capability, PluginHandle, Policy};
+use dupin_plugin_policy::{Access, Capability, PluginHandle, Policy, Tier};
 use dupin_plugin_protocol::Operation;
 #[cfg(feature = "wasm-runtime")]
 use dupin_plugin_protocol::{Outcome, VERSION};
@@ -23,9 +23,49 @@ use dupin_plugin_runtime::{GuestModule, HostError, MAX_MODULE_BYTES, QueryContro
 
 pub struct CapabilityDescriptor {
     pub id: &'static str,
-    pub title: &'static str,
-    pub description: &'static str,
-    kind: Capability,
+    pub kind: Capability,
+}
+
+impl CapabilityDescriptor {
+    pub fn allowed(&self, settings: &PluginSettings) -> bool {
+        match self.kind.tier() {
+            Tier::Visible => !settings.revoked.iter().any(|id| id == self.id),
+            Tier::Data | Tier::Privileged => settings.grants.iter().any(|id| id == self.id),
+        }
+    }
+}
+
+pub fn capability_label(capability: Capability) -> &'static str {
+    match capability {
+        Capability::ClipboardWrite => "Copy to clipboard",
+        Capability::CalendarRead => "Read calendar events",
+    }
+}
+
+#[cfg(feature = "wasm-runtime")]
+fn action_label(operation: &Operation) -> String {
+    match operation {
+        Operation::CopyText { text } => {
+            let mut chars = text.chars();
+            let mut preview: String = chars.by_ref().take(32).collect();
+            if chars.next().is_some() {
+                preview.push('…');
+            }
+            format!("Copy “{preview}”")
+        }
+    }
+}
+
+#[cfg(feature = "wasm-runtime")]
+fn guest_action(command: &CommandId, action: dupin_plugin_protocol::PluginAction) -> ItemAction {
+    ItemAction::new(
+        &action.id,
+        &action_label(&action.operation),
+        Action::Plugin {
+            command: command.clone(),
+            operation: action.operation,
+        },
+    )
 }
 
 pub struct Descriptor {
@@ -55,8 +95,6 @@ pub fn descriptors() -> &'static [Descriptor] {
         module: "calculator.wasm",
         capabilities: &[CapabilityDescriptor {
             id: "clipboard-write",
-            title: "Copy results",
-            description: "Allow this plugin to write a result to the clipboard when you choose Copy",
             kind: Capability::ClipboardWrite,
         }],
     }];
@@ -76,6 +114,7 @@ pub fn settings(config: &Config, plugin: &Descriptor) -> PluginSettings {
         .unwrap_or_else(|| PluginSettings {
             enabled: plugin.default_enabled,
             grants: Vec::new(),
+            revoked: Vec::new(),
         })
 }
 
@@ -117,11 +156,8 @@ impl Services {
             self.policy.set_enabled(&entry.handle, settings.enabled);
             entry.enabled.store(settings.enabled, Ordering::Release);
             for capability in plugin.capabilities {
-                self.policy.set_grant(
-                    &entry.handle,
-                    capability.kind,
-                    settings.grants.iter().any(|id| id == capability.id),
-                );
+                self.policy
+                    .set_grant(&entry.handle, capability.kind, capability.allowed(&settings));
             }
         }
     }
@@ -159,7 +195,7 @@ impl Services {
         let copy =
             PreparedCopy::prepare(&self.policy, &entry.handle, operation).map_err(|error| match error {
                 PrepareError::Access(Access::NeedsGrant) => {
-                    "Allow this plugin to copy results in Settings → Plugins."
+                    "Copy is turned off for this plugin in Settings → Plugins."
                 }
                 _ => "This action is no longer available.",
             })?;
@@ -225,16 +261,7 @@ impl Provider for GuestProvider {
                     actions: item
                         .actions
                         .into_iter()
-                        .map(|action| {
-                            ItemAction::new(
-                                &action.id,
-                                &action.title,
-                                Action::Plugin {
-                                    command: command.clone(),
-                                    operation: action.operation,
-                                },
-                            )
-                        })
+                        .map(|action| guest_action(&command, action))
                         .collect(),
                     completion: None,
                     record_usage: false,
@@ -320,30 +347,52 @@ mod tests {
     }
 
     #[test]
-    fn copying_requires_an_explicit_grant_and_enablement() {
+    fn copy_is_allowed_when_enabled_and_stops_when_revoked_or_disabled() {
         let mut config = Config::default();
         let plugin = &descriptors()[0];
         let command = command_id(plugin);
         let mut services = Services::new(&config);
         let operation = || Operation::CopyText { text: "42".into() };
-        assert!(
-            services
-                .copy(&command, operation(), || true, |_| panic!("no grant"))
-                .is_err()
-        );
-        config.plugins.insert(
-            plugin.id.into(),
-            PluginSettings {
-                enabled: true,
-                grants: vec!["clipboard-write".into()],
-            },
-        );
-        services.apply_config(&config);
         let mut clipboard = String::new();
         services
             .copy(&command, operation(), || true, |text| clipboard = text.to_owned())
             .unwrap();
         assert_eq!(clipboard, "42");
+        config.plugins.insert(
+            plugin.id.into(),
+            PluginSettings {
+                enabled: true,
+                grants: vec!["clipboard-write".into()],
+                revoked: vec!["clipboard-write".into()],
+            },
+        );
+        services.apply_config(&config);
+        assert_eq!(
+            services.copy(&command, operation(), || true, |_| panic!("revoked")),
+            Err("Copy is turned off for this plugin in Settings → Plugins.")
+        );
+        config.plugins.get_mut(plugin.id).unwrap().revoked.clear();
+        services.apply_config(&config);
+        let pending = PreparedCopy::prepare(
+            &services.policy,
+            &services.installed[&command].handle,
+            operation(),
+        )
+        .unwrap();
+        config
+            .plugins
+            .get_mut(plugin.id)
+            .unwrap()
+            .revoked
+            .push("clipboard-write".into());
+        services.apply_config(&config);
+        config.plugins.get_mut(plugin.id).unwrap().revoked.clear();
+        services.apply_config(&config);
+        assert!(
+            pending
+                .dispatch(&services.policy, || true, |_| panic!("stale permit"))
+                .is_err()
+        );
         assert!(
             services
                 .copy(&command, operation(), || false, |_| panic!("cancelled"))
@@ -357,12 +406,61 @@ mod tests {
                 .is_err()
         );
         config.plugins.get_mut(plugin.id).unwrap().enabled = true;
-        config.plugins.get_mut(plugin.id).unwrap().grants.clear();
+        config
+            .plugins
+            .get_mut(plugin.id)
+            .unwrap()
+            .revoked
+            .push("clipboard-write".into());
         services.apply_config(&config);
         assert!(
             services
                 .copy(&command, operation(), || true, |_| panic!("revoked"))
                 .is_err()
+        );
+    }
+
+    #[test]
+    fn data_access_still_requires_an_explicit_grant() {
+        let capability = CapabilityDescriptor {
+            id: "calendar-read",
+            kind: Capability::CalendarRead,
+        };
+        let mut settings = PluginSettings {
+            enabled: true,
+            grants: vec![],
+            revoked: vec!["calendar-read".into()],
+        };
+        assert!(!capability.allowed(&settings));
+        let mut policy = Policy::default();
+        let handle = policy.install([Capability::CalendarRead]);
+        policy.set_enabled(&handle, true);
+        policy.set_grant(&handle, capability.kind, capability.allowed(&settings));
+        assert!(matches!(
+            policy.access(&handle, capability.kind),
+            Access::NeedsGrant
+        ));
+        settings.grants.push("calendar-read".into());
+        assert!(capability.allowed(&settings));
+        assert_eq!(settings.revoked, ["calendar-read"]);
+    }
+
+    #[test]
+    fn guest_action_title_cannot_rename_the_host_action() {
+        let action = guest_action(
+            &command_id(&descriptors()[0]),
+            dupin_plugin_protocol::PluginAction {
+                id: "copy".into(),
+                title: "Open Safari".into(),
+                operation: Operation::CopyText { text: "3".into() },
+            },
+        );
+        assert_eq!(action.title, "Copy “3”");
+        assert_eq!(
+            action_label(&Operation::CopyText {
+                text: "日".repeat(33)
+            }),
+            format!("Copy “{}…”", "日".repeat(32))
         );
     }
 

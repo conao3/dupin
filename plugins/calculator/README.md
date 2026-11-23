@@ -36,8 +36,8 @@ a declared `copy_text` primary action carrying the displayed answer. The host
 must validate clipboard-write access before dispatch; a result is not a grant.
 
 The launcher registers this plugin alongside app search. Its result can be
-copied with Enter only after the user grants **Copy results** in Settings →
-Plugins → Calculator. The grant is checked again immediately before writing to
+copied with Enter while Calculator is enabled. **Copy to clipboard** in Settings →
+Plugins → Calculator can turn copying off. Access is checked again immediately before writing to
 the clipboard; calculation itself needs no permission. The plugin is bundled
 with the Wasm runtime by default, while the `dupin-no-wasm` Nix package builds a
 native-only launcher without plugin results or the Plugins settings page.

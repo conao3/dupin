@@ -87,9 +87,9 @@ Quick Look opens the native preview; Escape returns to the picker with its searc
 `define` or `d` followed by Space switches to Dictionary Services ("Define"). Type a word to see its definition from the dictionaries enabled in Dictionary.app. Right Arrow, Cmd+K, Enter or the Actions link opens its action screen; choose Open in Dictionary to launch the external app. Backspace on an empty query returns to app search. Set `dictionary_keywords` in [configuration](./configuration.md) to choose other aliases.
 
 Arithmetic and local unit conversions appear as a source/result card alongside
-app search; no keyword is needed. Enter copies the result only after **Copy
-results** has been granted in Settings → Plugins → Calculator. Without that
-grant, the query remains in place and the panel explains where to enable copying.
+app search; no keyword is needed. Enter copies the result while Calculator is
+enabled. Turn off **Copy to clipboard** in Settings → Plugins → Calculator to
+prevent copying; the query then stays in place with an explanation.
 Currency conversion is not available in the launcher yet.
 
 You can also paste a complete query such as `in release notes` or `d serendipity` into app search. Dupin accepts the same keywords and configured aliases, switches mode, and leaves the search term in the input.
