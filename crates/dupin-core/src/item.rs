@@ -45,6 +45,8 @@ pub enum Action {
     Preview(PathBuf),
     /// Open the host application's preferences.
     OpenPreferences,
+    ScriptArguments(PathBuf),
+    RunScript(crate::script::ScriptRun),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -59,7 +61,7 @@ pub(crate) enum ActionDisposition {
     /// Run the action, record usage and dismiss the launcher.
     #[default]
     Dismiss,
-    /// Run the action without recording a pick or dismissing the launcher.
+    /// Run the action without dismissing the launcher.
     KeepOpen,
     Consume,
 }

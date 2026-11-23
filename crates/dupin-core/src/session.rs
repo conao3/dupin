@@ -107,10 +107,6 @@ impl Renaming {
         &self.path
     }
 
-    pub fn layout_key(&self) -> &str {
-        &self.layout_key
-    }
-
     /// Why Enter can't rename to the proposed name.
     pub fn problem(&self) -> Option<&'static str> {
         crate::file_name::problem(&self.name)
@@ -185,6 +181,19 @@ impl RecentHistory {
             .read()
             .unwrap()
             .ranked_ids(usize::MAX, (self.clock)())
+    }
+}
+
+/// The result chosen for an action that needs more input.
+pub struct FollowupTarget {
+    item: Item,
+    command: CommandId,
+    query: String,
+}
+
+impl FollowupTarget {
+    pub fn is_current(&self, session: &Session) -> bool {
+        &self.command == session.command_id() && self.query == session.query()
     }
 }
 
@@ -620,8 +629,10 @@ impl Session {
                 action: action.action,
             }];
         }
+        let dismiss = action.disposition == ActionDisposition::Dismiss;
+        let picked = dismiss || matches!(action.action, Action::RunScript(_));
         let mut effects = vec![Effect::Run(action.action)];
-        if action.disposition == ActionDisposition::Dismiss {
+        if picked {
             if item.record_usage {
                 self.history
                     .write()
@@ -630,6 +641,8 @@ impl Session {
                 effects.push(Effect::SaveHistory);
             }
             self.remember_query(true);
+        }
+        if dismiss {
             effects.extend(self.dismiss());
         }
         effects
@@ -901,6 +914,22 @@ impl Session {
             return Vec::new();
         };
         self.activate(&item, action)
+    }
+    pub fn followup_target(&self, parent: &str) -> Option<FollowupTarget> {
+        let item = self.actionable_items().get(self.selected())?;
+        item.item_action(parent)?;
+        Some(FollowupTarget {
+            item: item.clone(),
+            command: self.command_id().clone(),
+            query: self.query().to_owned(),
+        })
+    }
+
+    pub fn run_followup(&mut self, target: FollowupTarget, action: ItemAction) -> Vec<Effect> {
+        if !target.is_current(self) {
+            return Vec::new();
+        }
+        self.activate(&target.item, action)
     }
 
     pub fn run_confirmed_key_action(&mut self, key: &str, action_id: &str) -> Vec<Effect> {

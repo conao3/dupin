@@ -186,6 +186,7 @@ pub struct Prefs {
     permissions: Vec<Access>,
     /// The first-run welcome's step while it covers the pages.
     welcome: Option<welcome::Step>,
+    pub(crate) scripts_notice: Option<String>,
     preview_dark: Option<bool>,
     active_radius: u16,
 }
@@ -244,6 +245,7 @@ impl Prefs {
             read_only: crate::settings::read_only(),
             settings,
             config_problem: None,
+            scripts_notice: None,
             login: objc2::MainThreadMarker::new()
                 .and_then(LoginItem::for_current_app)
                 .map(|item| LoginPreference {
@@ -639,6 +641,29 @@ pub fn view(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
                     },
                 )
                 .children(
+                    s.scripts_notice
+                        .as_ref()
+                        .filter(|_| s.welcome.is_none() && s.page == Page::Search)
+                        .map(|notice| {
+                            col()
+                                .key("scripts-notice")
+                                .mx(ROW_PX)
+                                .gap(4.0)
+                                .child(
+                                    text("Script discovery")
+                                        .font(k.ty.body_medium)
+                                        .color(k.c.text_base),
+                                )
+                                .child(
+                                    text(notice)
+                                        .w_full()
+                                        .font(DESCRIPTION)
+                                        .color(k.c.text_muted)
+                                        .wrap(),
+                                )
+                        }),
+                )
+                .children(
                     (s.read_only && shows_config)
                         .then(|| note(k, "config.toml is read-only, so change these where it's managed.")),
                 ),
@@ -919,7 +944,7 @@ fn general(s: &Prefs, k: &Kit) -> Vec<El> {
             k,
             &icons::REFRESH,
             "Relaunch Dupin",
-            Some("Restart and reload configuration"),
+            Some("Restart, reload configuration and cancel running scripts"),
             relaunch,
         ),
     ]
@@ -1409,7 +1434,10 @@ fn updates(s: &Prefs, k: &Kit) -> Vec<El> {
             .on_press(|s: &mut Prefs| s.updater.check_now()),
     }
     .build(k);
-    let line = status.text(s.config.auto_update, s.updater.download_only());
+    let mut line = status.text(s.config.auto_update, s.updater.download_only());
+    if matches!(status, Status::Ready(_)) {
+        line.push_str(". Restarting cancels running scripts.");
+    }
     vec![
         setting(
             k,

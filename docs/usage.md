@@ -51,6 +51,8 @@ ranked by how recently and how often you used them. These rows have the regular
 app and file actions. Turn off **Show recent items** in Settings → Search to keep
 the panel empty before typing.
 
+Executable [script commands](./scripts.md) also appear in normal search. Scripts with arguments open a separate argument field; their output can stay inline or stream into the Script Output window.
+
 Dupin finds the `.app` bundles in `/Applications`, `/System/Applications` and `~/Applications`, one folder deep (so `Utilities` is included). An app matches by any name macOS knows it by:
 
 - the name Finder shows, localized (システム設定 for System Settings on a Japanese Mac);

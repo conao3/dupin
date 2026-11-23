@@ -23,7 +23,9 @@ def main [
     $env.DUPIN_HEADLESS_CLIPBOARD = $root | path join scripts/fixtures/clipboard.json
     mkdir $out
     let tmp = mktemp --directory
-    let shots = glob scripts/headless/*.json | sort | each {|script|
+    let config = $tmp | path join config
+    cp --recursive scripts/headless/config $config
+    let shots = with-env {XDG_CONFIG_HOME: $config, XDG_DATA_HOME: ($tmp | path join data), HOME: $tmp} { glob scripts/headless/*.json | sort | each {|script|
         let name = $script | path parse | get stem
         let tree = $tmp | path join $"($name).json"
         let config = scenario-env $script $tmp
@@ -36,7 +38,7 @@ def main [
             headless $bin --script $script --realtime --snap $png --at mark:end --scale 2 --size $"680x($height)"
         }
         {name: $name, png: ($png | path expand), height: $height}
-    }
+    } }
     rm --recursive $tmp
     $shots
 }

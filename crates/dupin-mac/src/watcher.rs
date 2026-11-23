@@ -29,6 +29,14 @@ impl PathWatcher {
         Self::start_with_scope(roots, true, extra_paths, move |_| changed())
     }
 
+    /// Watches direct entries and reports when a watched root changes identity.
+    pub fn start_shallow(
+        roots: Vec<PathBuf>,
+        changed: impl Fn(bool) + Send + Sync + 'static,
+    ) -> Result<Self, &'static str> {
+        Self::start_with_scope(roots, false, |_| Vec::new(), changed)
+    }
+
     /// Watches directory entries without forwarding descendant events.
     /// Reconciles the file's metadata to detect in-place writes when FSEvents is silent.
     /// The callback receives `true` when a watched root changes identity.
