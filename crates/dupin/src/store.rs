@@ -101,7 +101,10 @@ fn write(json: &str) -> std::io::Result<()> {
     let dir = path
         .parent()
         .ok_or_else(|| std::io::Error::other("no parent directory"))?;
+    #[cfg(target_os = "macos")]
     std::fs::create_dir_all(dir)?;
+    #[cfg(target_os = "linux")]
+    crate::platform::dirs::create_private(dir)?;
     let mut staged = tempfile::Builder::new()
         .prefix(".history.json.")
         .suffix(".tmp")

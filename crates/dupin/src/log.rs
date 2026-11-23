@@ -19,11 +19,15 @@ pub fn warn(message: &str) {
         return;
     };
     let write = || -> std::io::Result<()> {
+        #[cfg(target_os = "macos")]
         std::fs::create_dir_all(&dir)?;
-        let mut file = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(dir.join("dupin.log"))?;
+        #[cfg(target_os = "macos")]
+        let mut options = std::fs::OpenOptions::new();
+        #[cfg(target_os = "linux")]
+        crate::platform::dirs::create_private(&dir)?;
+        #[cfg(target_os = "linux")]
+        let mut options = crate::platform::dirs::private_file();
+        let mut file = options.create(true).append(true).open(dir.join("dupin.log"))?;
         let secs = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_secs());
