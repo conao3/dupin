@@ -27,7 +27,7 @@ pub use detail::Detail;
 pub use history::History;
 pub(crate) use item::ActionDisposition;
 pub use item::{Action, Item, ItemAction, Page, Payload, ShareTarget, SystemCommand, View};
-pub use provider::{Batch, Provider, ProviderError, Request};
+pub use provider::{Batch, Cancellation, Provider, ProviderError, Request};
 pub use searcher::{Delivery, Searcher};
 pub use session::{Effect, Intent, Session};
 
