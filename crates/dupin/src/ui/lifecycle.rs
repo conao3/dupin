@@ -75,6 +75,10 @@ impl Ui {
             self.selection_request = SelectionRequest::Superseded;
         }
         crate::trace::summoned();
+        #[cfg(target_os = "linux")]
+        {
+            self.focus_lost_until = None;
+        }
         if !self.shown && !rune::tooling::is_headless() {
             self.front.capture();
             crate::extensions::access::refresh_os_access(&self.extensions.bridge, &self.calendar_access);
