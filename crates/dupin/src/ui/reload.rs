@@ -1,7 +1,7 @@
 use dupin_core::{Backdrop, Config, DisplaySelection};
 use rune::Tx;
 
-use super::{ActionStage, Ui};
+use super::Ui;
 
 impl Ui {
     pub fn apply_config(&mut self, config: &Config, tx: &mut Tx) {
@@ -10,37 +10,9 @@ impl Ui {
         }
         self.theme = config.theme.clone();
         let previous_limit = self.session.command().result_limit;
-        let ranking_changed = {
-            let mut rules = self.file_demotions.write().unwrap();
-            let changed = *rules != config.file_demotions;
-            if changed {
-                rules.clone_from(&config.file_demotions);
-            }
-            changed
-        };
-        let clipboard_changed = self.clipboard.apply(&config.clipboard);
-        self.watch_extensions(config.extensions);
         let mut registration =
             crate::commands::configured(config).expect("built-in command registration is valid");
-        let extension_changed = self.install_extensions(&mut registration);
-        let web_changed = {
-            let mut web = self.web.write().unwrap();
-            let changed = *web != registration.web;
-            *web = registration.web;
-            changed
-        };
-        let snippets_changed = {
-            let mut snippets = self.snippets.write().unwrap();
-            let changed = *snippets != registration.snippets;
-            *snippets = registration.snippets;
-            changed
-        };
-        if web_changed
-            && let Some(screen) = &mut self.action_screen
-            && matches!(screen.stage, ActionStage::Receivers { .. })
-        {
-            screen.stage = ActionStage::List;
-        }
+        let feature_changed = crate::features::reload(self, config, &mut registration);
         let sources = registration.registry.ids();
         self.snapshots.update(move |s, _| s.set_sources(sources));
         let effects = self
@@ -48,28 +20,9 @@ impl Ui {
             .set_commands(registration.registry)
             .expect("built-in command registration is valid");
         self.registration_notice = registration.notice;
-        self.window_management_enabled = config.window_management;
-        if !config.window_management {
-            self.window_permission_required = false;
-        }
-        let is_apps = self.session.command_id().as_str() == crate::commands::APPS;
-        let empty = self.session.query().trim().is_empty();
-        let currency_changed = self
-            .currency
-            .set_enabled(config.calculator && config.calculator_currency);
-        let automation_changed = self
-            .system_provider
-            .set_automation_enabled(config.system_automation);
         if !effects.is_empty() {
             self.apply(effects, tx);
-        } else if extension_changed
-            || self.session.command().result_limit != previous_limit
-            || ((web_changed || currency_changed || automation_changed) && is_apps && !empty)
-            || (automation_changed && self.session.command_id().as_str() == crate::commands::SYSTEM)
-            || (ranking_changed && self.session.command_id().as_str() == crate::commands::FILES)
-            || (clipboard_changed && self.session.command_id().as_str() == crate::commands::CLIPBOARD)
-            || (snippets_changed && self.session.command_id().as_str() == crate::commands::SNIPPETS)
-        {
+        } else if feature_changed || self.session.command().result_limit != previous_limit {
             self.action_screen = None;
             let effects = self.session.refresh();
             self.apply(effects, tx);

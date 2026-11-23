@@ -1,33 +1,13 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
 
-use dupin_core::clipboard::ClipboardProvider;
-use dupin_core::snippets::{SnippetCatalog, SnippetProvider};
+use dupin_core::snippets::SnippetCatalog;
 use dupin_core::{
-    CommandId, CommandRegistry, CommandSpec, Config, History, Provider, QueryEligibility, QueryPresentation,
-    Session,
+    CommandError, CommandId, CommandRegistry, Config, History, Provider, QueryPresentation, Session,
 };
-use dupin_mac::{
-    AppsProvider, CalendarProvider, DictionaryProvider, FolderProvider, RecentProvider, SpotlightProvider,
-    Target, system_commands,
-};
+use dupin_mac::{AppsProvider, CalendarProvider, system_commands};
 
-pub const APPS: &str = "apps.search";
-pub const FILES: &str = "files.names";
-pub const CONTENTS: &str = "files.contents";
-pub const DICTIONARY: &str = "dictionary.lookup";
-pub const CALENDAR: &str = "calendar.events";
-pub const CLIPBOARD: &str = "clipboard.history";
-pub const SNIPPETS: &str = "snippets.search";
-pub const SCRIPTS: &str = "scripts.search";
-const BROWSE: &str = "files.browse";
-pub(crate) const SYSTEM: &str = "system.commands";
-const SETTINGS: &str = "settings.search";
-const CALCULATOR: &str = "calculator.evaluate";
-const WEB_KEYWORDS: &str = "web.keywords";
-const WEB_FALLBACKS: &str = "web.fallbacks";
-const WINDOWS: &str = "windows.arrange";
-const MAX_FILE_CANDIDATES: usize = 10_000;
+use crate::features::{MANIFEST, apps::APPS, files::FILES};
 
 pub struct Registration {
     pub session: Session,
@@ -47,59 +27,11 @@ pub struct ConfiguredCommands {
     pub snippets: SnippetCatalog,
 }
 
-fn parsed_file_query(
-    command: &CommandId,
-    raw: &str,
-) -> Option<Result<dupin_core::file_query::FileQuery, dupin_core::file_query::FileQueryError>> {
-    matches!(command.as_str(), FILES | CONTENTS).then(|| dupin_core::file_query::FileQuery::parse(raw))
-}
-
-pub fn query_qualifier_ranges(command: &CommandId, raw: &str) -> Vec<std::ops::Range<usize>> {
-    parsed_file_query(command, raw)
-        .and_then(Result::ok)
-        .map(|query| query.qualifier_ranges)
-        .unwrap_or_default()
-}
-
-pub fn query_problem(command: &CommandId, raw: &str) -> Option<&'static str> {
-    match parsed_file_query(command, raw)? {
-        Err(error) => Some(error.message()),
-        Ok(query) if command.as_str() == CONTENTS && query.terms.is_empty() && !raw.trim().is_empty() => {
-            Some("Type a word to search file contents.")
-        }
-        _ => None,
-    }
-}
-
-/// Register `keywords` for `command`, describing the ones that couldn't be, under `setting`.
-fn add_keywords(
-    registry: &mut CommandRegistry,
-    command: &CommandId,
-    keywords: &[String],
-    setting: &str,
-) -> Option<String> {
-    let rejected: Vec<_> = keywords
-        .iter()
-        .filter_map(|keyword| registry.add_keyword(command, keyword).err())
-        .map(|error| error.to_string())
-        .collect();
-    (!rejected.is_empty()).then(|| {
-        format!(
-            "Some keywords were not registered. Review {setting} in config.toml: {}",
-            rejected.join("; "),
-        )
-    })
-}
-
-fn id(value: &str) -> CommandId {
+pub(super) fn id(value: &str) -> CommandId {
     CommandId::new(value).expect("built-in command IDs are valid")
 }
 
-fn recent_id() -> CommandId {
-    id("recent.items")
-}
-
-fn presentation(
+pub(super) fn presentation(
     placeholder: &str,
     chip: Option<&str>,
     empty_hint: Option<&str>,
@@ -117,269 +49,69 @@ fn presentation(
     }
 }
 
-pub fn configured(config: &Config) -> Result<ConfiguredCommands, dupin_core::CommandError> {
-    let file_limit = config.file_limit.min(MAX_FILE_CANDIDATES);
-    let apps_id = id(APPS);
-    let files_id = id(FILES);
-    let contents_id = id(CONTENTS);
-    let dictionary_id = id(DICTIONARY);
-    let snippets_id = id(SNIPPETS);
-    let mut registry = CommandRegistry::new(apps_id.clone(), Some(files_id.clone()));
-    for command in [
-        CommandSpec::new(
-            apps_id.clone(),
-            50,
-            presentation("Search apps", None, None, Some("No matches"), false, 0.0),
-        ),
-        CommandSpec::new(
-            files_id.clone(),
-            file_limit,
-            presentation(
-                "Search files",
-                Some("Files"),
-                Some("Type to search files with Spotlight  ·  ⌫ back to apps"),
-                Some("No matches"),
-                true,
-                1.0,
-            ),
-        )
-        .with_candidate_limit(file_limit.saturating_mul(4).min(MAX_FILE_CANDIDATES)),
-        CommandSpec::new(
-            contents_id.clone(),
-            file_limit,
-            presentation(
-                "Search inside files",
-                Some("In files"),
-                Some("Type to search inside files with Spotlight  ·  ⌫ back to apps"),
-                Some("No matches"),
-                true,
-                2.0,
-            ),
-        ),
-        CommandSpec::new(
-            id(BROWSE),
-            file_limit,
-            presentation("Filter folder", None, None, Some("No matches"), false, 1.0),
-        )
-        .with_query_eligibility(QueryEligibility::Any)
-        .with_candidate_limit(MAX_FILE_CANDIDATES),
-        CommandSpec::new(
-            dictionary_id.clone(),
-            1,
-            presentation(
-                "Look up a word",
-                Some("Define"),
-                Some("Type a word  ·  ⌫ back to apps"),
-                Some("No definition found"),
-                true,
-                3.0,
-            ),
-        ),
-        CommandSpec::new(
-            snippets_id.clone(),
-            config.snippets.len(),
-            presentation(
-                "Search snippets",
-                Some("Snippets"),
-                Some("No snippets yet: add them to config.toml  ·  ⌫ back to apps"),
-                Some("No matching snippets"),
-                false,
-                0.0,
-            ),
-        )
-        .with_query_eligibility(QueryEligibility::Any),
-    ] {
-        registry.register(command)?;
-    }
-    registry.set_destination_search(files_id)?;
+pub(super) struct Configure {
+    pub registry: CommandRegistry,
+    pub defaults: Vec<CommandId>,
+    pub pinned: Option<CommandId>,
+    pub notices: Vec<String>,
+    pub web: crate::web::WebCatalog,
+    pub snippets: SnippetCatalog,
+}
 
-    registry.register(CommandSpec::new(
-        id(SYSTEM),
-        system_commands::COMMANDS.len(),
-        presentation("Search system commands", None, None, None, false, 0.0),
-    ))?;
-    registry.register(CommandSpec::new(
-        id(SETTINGS),
-        10,
-        presentation("Search settings", None, None, None, false, 0.0),
-    ))?;
-    registry.register(CommandSpec::new(
-        id(CALCULATOR),
-        usize::from(config.calculator),
-        presentation("Calculate", None, None, None, false, 0.0),
-    ))?;
-    registry.register(CommandSpec::new(
-        id(WEB_KEYWORDS),
-        1,
-        presentation("Web search", None, None, None, false, 0.0),
-    ))?;
-    registry.register(
-        CommandSpec::new(
-            id(WEB_FALLBACKS),
-            20,
-            presentation("Web search", None, None, None, false, 0.0),
-        )
-        .with_fallback(),
-    )?;
-    registry.register(CommandSpec::new(
-        id(SCRIPTS),
-        8,
-        presentation("Search scripts", None, None, None, false, 0.0),
-    ))?;
-    let mut default_providers = vec![
-        apps_id,
-        id(SYSTEM),
-        id(SCRIPTS),
-        id(SETTINGS),
-        id(WEB_KEYWORDS),
-        id(WEB_FALLBACKS),
-    ];
-    if config.calculator {
-        default_providers.insert(0, id(CALCULATOR));
+impl Configure {
+    pub fn add_keywords(&mut self, command: &CommandId, keywords: &[String], setting: &str) {
+        let rejected: Vec<_> = keywords
+            .iter()
+            .filter_map(|keyword| self.registry.add_keyword(command, keyword).err())
+            .map(|error| error.to_string())
+            .collect();
+        if !rejected.is_empty() {
+            self.notices.push(format!(
+                "Some keywords were not registered. Review {setting} in config.toml: {}",
+                rejected.join("; "),
+            ));
+        }
     }
-    if config.show_recent {
-        let recent = recent_id();
-        registry.register(
-            CommandSpec::new(
-                recent.clone(),
-                10,
-                presentation("Recent items", None, None, None, false, 0.0),
-            )
-            .with_query_eligibility(QueryEligibility::EmptyOnly),
-        )?;
-        default_providers.push(recent);
-    }
-    if config.window_management {
-        registry.register(CommandSpec::new(
-            id(WINDOWS),
-            crate::window_management::COMMANDS.len(),
-            presentation("Arrange windows", None, None, None, false, 0.0),
-        ))?;
-        default_providers.push(id(WINDOWS));
-    }
-    registry.set_default_providers(default_providers, Some(id(WEB_KEYWORDS)))?;
+}
 
-    registry.set_browser(id(BROWSE))?;
-    registry.add_keyword(&contents_id, "in")?;
-    if config.clipboard.enabled {
-        let clipboard = id(CLIPBOARD);
-        let mut spec = CommandSpec::new(
-            clipboard.clone(),
-            config.clipboard.max_entries,
-            presentation(
-                "Search clipboard history",
-                Some("Clipboard"),
-                Some("Nothing copied yet  ·  ⌫ back to apps"),
-                Some("No matches"),
-                false,
-                4.0,
-            ),
-        )
-        .with_query_eligibility(QueryEligibility::Any);
-        spec.private_results = true;
-        registry.register(spec)?;
-        registry.add_keyword(&clipboard, "clip")?;
+pub fn configured(config: &Config) -> Result<ConfiguredCommands, CommandError> {
+    let mut commands = Configure {
+        registry: CommandRegistry::new(id(APPS), Some(id(FILES))),
+        defaults: Vec::new(),
+        pinned: None,
+        notices: Vec::new(),
+        web: crate::web::WebCatalog::default(),
+        snippets: SnippetCatalog::default(),
+    };
+    for feature in MANIFEST {
+        (feature.configure)(config, &mut commands)?;
     }
-    if config.calendar.enabled {
-        let calendar = id(CALENDAR);
-        let mut spec = CommandSpec::new(
-            calendar.clone(),
-            30,
-            presentation(
-                "Search calendar events",
-                Some("Calendar"),
-                Some("No upcoming events"),
-                Some("No matching events"),
-                true,
-                5.0,
-            ),
-        )
-        .with_query_eligibility(QueryEligibility::Any);
-        spec.private_results = true;
-        registry.register(spec)?;
-        registry.add_keyword(&calendar, "cal")?;
+    commands
+        .registry
+        .set_default_providers(std::mem::take(&mut commands.defaults), commands.pinned.take())?;
+    for feature in MANIFEST {
+        (feature.prepare)(config, &mut commands);
     }
-    let dictionary_notice = add_keywords(
-        &mut registry,
-        &dictionary_id,
-        &config.dictionary_keywords,
-        "dictionary_keywords",
-    );
-    let snippet_keyword_notice = add_keywords(
-        &mut registry,
-        &snippets_id,
-        &config.snippet_keywords,
-        "snippet_keywords",
-    );
-
-    let (web, web_notice) =
-        crate::web::WebCatalog::compile(config, |keyword| registry.keyword(keyword).is_some());
-    let (snippets, snippets_notice) = SnippetCatalog::compile(config);
-    let notices: Vec<_> = [
-        dictionary_notice,
-        snippet_keyword_notice,
-        web_notice,
-        snippets_notice,
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
-    let notice = (!notices.is_empty()).then(|| notices.join("\n"));
     Ok(ConfiguredCommands {
-        registry,
-        notice,
-        web,
-        snippets,
+        registry: commands.registry,
+        notice: (!commands.notices.is_empty()).then(|| commands.notices.join("\n")),
+        web: commands.web,
+        snippets: commands.snippets,
     })
 }
 
-/// Extensions whose commands were registered, and why the others were not. Built-in and
-/// configured keywords always win: an extension never replaces another command's keyword.
-pub struct Extensions {
-    pub registered: Vec<(CommandId, Arc<crate::extensions::Extension>)>,
-    pub problems: Vec<String>,
+pub(super) struct Providers<'a> {
+    pub registration: &'a mut Registration,
+    pub apps: Arc<AppsProvider>,
+    pub calendar: Arc<CalendarProvider>,
+    pub clipboard: Arc<Mutex<dupin_core::clipboard::History>>,
+    pub calculator: Arc<crate::calculator::Calculator>,
 }
 
-pub fn add_extensions(
-    configured: &mut ConfiguredCommands,
-    extensions: &[Arc<crate::extensions::Extension>],
-) -> Extensions {
-    let mut added = Extensions {
-        registered: Vec::new(),
-        problems: Vec::new(),
-    };
-    for extension in extensions {
-        let keyword = &extension.keyword;
-        if configured.web.has_keyword(keyword) || configured.registry.keyword(keyword).is_some() {
-            added.problems.push(format!(
-                "{}: keyword `{keyword}` is already used by another command",
-                extension.folder_name
-            ));
-            continue;
-        }
-        let Ok(command) = CommandId::new(format!("extension.{}", extension.id)) else {
-            continue;
-        };
-        let mut spec = CommandSpec::new(
-            command.clone(),
-            50,
-            presentation(
-                &format!("Ask {}", extension.name),
-                Some(&extension.name),
-                Some(&format!("Type for {}  ·  ⌫ back to apps", extension.name)),
-                Some("No results"),
-                true,
-                0.0,
-            ),
-        );
-        spec.deadline = crate::extensions::QUERY_DEADLINE + std::time::Duration::from_secs(1);
-        if configured.registry.register(spec).is_ok()
-            && configured.registry.add_keyword(&command, keyword.clone()).is_ok()
-        {
-            added.registered.push((command, extension.clone()));
-        }
+impl Providers<'_> {
+    pub fn add(&mut self, command: &str, provider: Arc<dyn Provider>) {
+        self.registration.providers.insert(id(command), provider);
     }
-    added
 }
 
 pub fn register(
@@ -389,7 +121,7 @@ pub fn register(
     calendar: CalendarProvider,
     clipboard: Arc<Mutex<dupin_core::clipboard::History>>,
     calculator: crate::calculator::Calculator,
-) -> Result<Registration, dupin_core::CommandError> {
+) -> Result<Registration, CommandError> {
     let ConfiguredCommands {
         registry,
         notice,
@@ -399,87 +131,149 @@ pub fn register(
     let session = Session::new(history, registry)?;
     let web = Arc::new(RwLock::new(web));
     let snippets = Arc::new(RwLock::new(snippets));
-    let apps_id = id(APPS);
-    let files_id = id(FILES);
-    let contents_id = id(CONTENTS);
-    let dictionary_id = id(DICTIONARY);
     let file_demotions = Arc::new(RwLock::new(config.file_demotions.clone()));
     let scripts = Arc::new(RwLock::new(crate::scripts::catalog::Catalog::default()));
     let system_provider = Arc::new(system_commands::SystemProvider::new(config.system_automation));
-    let providers: HashMap<_, Arc<dyn Provider>> = [
-        (apps_id, apps.clone() as Arc<dyn Provider>),
-        (id(SYSTEM), system_provider.clone() as Arc<dyn Provider>),
-        (
-            recent_id(),
-            Arc::new(RecentProvider::new(apps, session.recent_history())) as Arc<dyn Provider>,
-        ),
-        (id(CALENDAR), Arc::new(calendar) as Arc<dyn Provider>),
-        (
-            id(SCRIPTS),
-            Arc::new(crate::scripts::provider::ScriptsProvider(scripts.clone())) as Arc<dyn Provider>,
-        ),
-        (id(CALCULATOR), Arc::new(calculator) as Arc<dyn Provider>),
-        (
-            id(SETTINGS),
-            Arc::new(dupin_mac::SettingsProvider::default()) as Arc<dyn Provider>,
-        ),
-        (
-            id(WINDOWS),
-            Arc::new(crate::window_management::WindowProvider) as Arc<dyn Provider>,
-        ),
-        (
-            files_id,
-            Arc::new(SpotlightProvider::with_demotions(
-                Target::Names,
-                file_demotions.clone(),
-            )) as Arc<dyn Provider>,
-        ),
-        (
-            contents_id,
-            Arc::new(SpotlightProvider::new(Target::Contents)) as Arc<dyn Provider>,
-        ),
-        (
-            dictionary_id,
-            Arc::new(DictionaryProvider::default()) as Arc<dyn Provider>,
-        ),
-        (id(BROWSE), Arc::new(FolderProvider) as Arc<dyn Provider>),
-        (
-            id(SNIPPETS),
-            Arc::new(SnippetProvider::new(snippets.clone())) as Arc<dyn Provider>,
-        ),
-        (
-            id(CLIPBOARD),
-            Arc::new(ClipboardProvider::new(
-                clipboard,
-                dupin_mac::clipboard::access_item,
-            )) as Arc<dyn Provider>,
-        ),
-        (
-            id(WEB_KEYWORDS),
-            Arc::new(crate::web::WebProvider::new(web.clone(), false)) as Arc<dyn Provider>,
-        ),
-        (
-            id(WEB_FALLBACKS),
-            Arc::new(crate::web::WebProvider::new(web.clone(), true)) as Arc<dyn Provider>,
-        ),
-    ]
-    .into();
-
-    Ok(Registration {
+    let mut registration = Registration {
         session,
-        providers,
+        providers: HashMap::new(),
         notice,
         web,
         snippets,
         file_demotions,
         scripts,
         system_provider,
-    })
+    };
+    let mut providers = Providers {
+        registration: &mut registration,
+        apps,
+        calendar: Arc::new(calendar),
+        clipboard,
+        calculator: Arc::new(calculator),
+    };
+    for feature in MANIFEST {
+        (feature.start)(&mut providers);
+    }
+    Ok(registration)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::features::{
+        calculator::CALCULATOR,
+        calendar::CALENDAR,
+        clipboard::CLIPBOARD,
+        dictionary::DICTIONARY,
+        extensions::add_extensions,
+        files::{CONTENTS, MAX_FILE_CANDIDATES, query_problem, query_qualifier_ranges},
+        recent::RECENT,
+        snippets::SNIPPETS,
+        system::SYSTEM,
+        web::WEB_KEYWORDS,
+        windows::WINDOWS,
+    };
+    use dupin_core::snippets::SnippetProvider;
+
+    #[test]
+    fn manifest_preserves_command_ids_provider_order_and_keywords() {
+        use dupin_core::{Effect, config::WebSearch};
+
+        let mut config = Config {
+            calculator: true,
+            show_recent: true,
+            window_management: true,
+            dictionary_keywords: ["in", "clip", "cal", "define", "shared"]
+                .map(str::to_owned)
+                .into(),
+            snippet_keywords: ["shared", "snip"].map(str::to_owned).into(),
+            web_searches: ["in", "clip", "cal", "define", "shared", "snip", "web"]
+                .into_iter()
+                .map(|keyword| {
+                    (
+                        keyword.into(),
+                        WebSearch {
+                            name: "Example".into(),
+                            url: "https://example.com/?q={query}".into(),
+                        },
+                    )
+                })
+                .collect(),
+            web_fallbacks: vec!["web".into()],
+            ..Config::default()
+        };
+        config.calendar.enabled = true;
+        config.clipboard.enabled = true;
+        let ConfiguredCommands { registry, web, .. } = configured(&config).unwrap();
+
+        let mut ids = registry.ids();
+        ids.sort();
+        assert_eq!(
+            ids,
+            [
+                "apps.search",
+                "calculator.evaluate",
+                "calendar.events",
+                "clipboard.history",
+                "dictionary.lookup",
+                "files.browse",
+                "files.contents",
+                "files.names",
+                "recent.items",
+                "scripts.search",
+                "settings.search",
+                "snippets.search",
+                "system.commands",
+                "web.fallbacks",
+                "web.keywords",
+                "windows.arrange",
+            ]
+        );
+        for (keyword, expected) in [
+            ("in", Some("files.contents")),
+            ("clip", Some("clipboard.history")),
+            ("cal", Some("calendar.events")),
+            ("define", Some("dictionary.lookup")),
+            ("shared", Some("dictionary.lookup")),
+            ("snip", Some("snippets.search")),
+            ("web", None),
+        ] {
+            assert_eq!(registry.keyword(keyword).map(CommandId::as_str), expected);
+        }
+        assert_eq!(
+            web.search_urls("example")
+                .map(|(keyword, _, _)| keyword)
+                .collect::<Vec<_>>(),
+            ["web"]
+        );
+
+        let mut session = Session::new(History::default(), registry).unwrap();
+        assert!(matches!(
+            session.refresh().as_slice(),
+            [Effect::Search { command, .. }] if command.as_str() == "recent.items"
+        ));
+        let effects = session.set_query("manifest");
+        let providers: Vec<_> = effects
+            .iter()
+            .filter_map(|effect| match effect {
+                Effect::Search { command, .. } => Some(command.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            providers,
+            [
+                "calculator.evaluate",
+                "apps.search",
+                "system.commands",
+                "scripts.search",
+                "settings.search",
+                "web.keywords",
+                "web.fallbacks",
+                "windows.arrange",
+            ]
+        );
+    }
 
     #[test]
     fn normal_search_dispatches_each_command_through_its_expected_activation() {
@@ -501,7 +295,7 @@ mod tests {
             (SystemCommand::ToggleDarkMode, "Toggle Dark Mode", false),
         ] {
             let configured = crate::commands::configured(&config).unwrap();
-            let origin = CommandId::new(crate::commands::SYSTEM).unwrap();
+            let origin = CommandId::new(SYSTEM).unwrap();
             let mut session = Session::new(History::default(), configured.registry).unwrap();
             let generation = session
                 .set_query(title)
@@ -674,7 +468,7 @@ mod tests {
         let mut session = Session::new(History::default(), configured(&config).unwrap().registry).unwrap();
         assert!(matches!(
             session.refresh().as_slice(),
-            [Effect::Search { command, query, .. }] if *command == recent_id() && query.is_empty()
+            [Effect::Search { command, query, .. }] if *command == id(RECENT) && query.is_empty()
         ));
 
         config.show_recent = false;
@@ -811,6 +605,7 @@ mod tests {
             ("Dictionary Clash", "define"),
             ("Contents Clash", "in"),
             ("Web Clash", "gh"),
+            ("Snippet Clash", "snip"),
             ("Second Count", "wc"),
         ]
         .into_iter()
@@ -824,12 +619,14 @@ mod tests {
         assert_eq!(configured.registry.keyword("wc"), Some(&words));
         assert_eq!(configured.registry.keyword("define"), Some(&id(DICTIONARY)));
         assert_eq!(configured.registry.keyword("in"), Some(&id(CONTENTS)));
+        assert_eq!(configured.registry.keyword("snip"), Some(&id(SNIPPETS)));
         assert!(configured.web.has_keyword("gh"));
-        assert_eq!(added.problems.len(), 4, "{:?}", added.problems);
+        assert_eq!(added.problems.len(), 5, "{:?}", added.problems);
         for (problem, folder) in added.problems.iter().zip([
             "dictionary-clash-folder",
             "contents-clash-folder",
             "web-clash-folder",
+            "snippet-clash-folder",
             "second-count-folder",
         ]) {
             assert!(
