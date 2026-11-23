@@ -3,6 +3,90 @@ use std::path::PathBuf;
 use super::*;
 use crate::{Action, CommandId, CommandRegistry, CommandSpec, QueryPresentation, View};
 
+fn file_action_session() -> (Session, String, u64) {
+    let mut s = session();
+    let generation = searched(&s.set_query("file")).1;
+    let mut row = item("file");
+    row.actions.push(ItemAction::new(
+        "choose",
+        "Open with…",
+        Action::ChooseApplication("/file".into()),
+    ));
+    row.actions.push(
+        ItemAction::new("trash", "Trash", Action::Trash("/file".into()))
+            .confirm("Trash?", "Trash")
+            .consumes(),
+    );
+    row.primary = Some("trash".into());
+    row.alternate = Some("trash".into());
+    s.deliver(Delivery::Batch {
+        generation,
+        items: vec![row],
+    });
+    let key = s.result_key(0);
+    (s, key, generation)
+}
+
+#[test]
+fn confirmed_consumption_cannot_run_from_normal_activation() {
+    let (mut s, key, _) = file_action_session();
+    let history = s.history().clone();
+    assert!(s.intent(Intent::Open).unwrap().is_empty());
+    assert!(s.intent(Intent::OpenAlternate).unwrap().is_empty());
+    assert!(s.run_key_action(&key, "trash").is_empty());
+    assert!(s.run_key_action(&key, "choose").is_empty());
+    assert!(s.run_confirmed_key_action(&key, "choose").is_empty());
+    assert_eq!(
+        s.run_confirmed_key_action(&key, "trash"),
+        vec![Effect::RunConsuming {
+            id: key.clone(),
+            action: Action::Trash("/file".into())
+        }]
+    );
+    assert_eq!(s.history(), &history);
+    s.set_query("other");
+    assert!(s.run_confirmed_key_action(&key, "trash").is_empty());
+}
+
+#[test]
+fn application_choices_belong_to_the_current_parent_resource() {
+    let (mut s, key, _) = file_action_session();
+    let choice = |path: &str| Action::OpenWith {
+        path: path.into(),
+        application: "/Viewer.app".into(),
+    };
+    assert!(s.run_key_choice(&key, "choose", choice("/wrong")).is_empty());
+    assert!(s.run_key_choice(&key, "trash", choice("/file")).is_empty());
+    assert!(
+        s.run_key_choice(&key, "choose", Action::Trash("/file".into()))
+            .is_empty()
+    );
+    let effects = s.run_key_choice(&key, "choose", choice("/file"));
+    assert!(effects.contains(&Effect::Run(choice("/file"))));
+    assert!(effects.contains(&Effect::SaveHistory));
+    assert!(effects.contains(&Effect::Hide));
+    assert!(s.run_key_choice(&key, "choose", choice("/file")).is_empty());
+}
+
+#[test]
+fn consumed_rows_cannot_return_in_late_batches_or_remove_new_generations() {
+    let (mut s, key, generation) = file_action_session();
+    assert!(s.forget(&key));
+    assert!(s.items().is_empty());
+    s.deliver(Delivery::Batch {
+        generation,
+        items: vec![item("file")],
+    });
+    assert!(s.items().is_empty());
+    let generation = searched(&s.set_query("new file")).1;
+    s.deliver(Delivery::Batch {
+        generation,
+        items: vec![item("file")],
+    });
+    assert!(!s.forget(&key));
+    assert_eq!(s.items().len(), 1);
+}
+
 fn command(value: &str) -> CommandId {
     CommandId::new(value).unwrap()
 }
