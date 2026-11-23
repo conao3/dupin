@@ -158,7 +158,7 @@ impl Item {
 }
 
 /// `$HOME/x` as `~/x`, as Finder and shells show it.
-fn tilde(path: &str) -> String {
+pub fn tilde(path: &str) -> String {
     match std::env::var("HOME") {
         Ok(home) if !home.is_empty() && path.starts_with(&home) => {
             let rest = &path[home.len()..];

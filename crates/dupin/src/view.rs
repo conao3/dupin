@@ -185,6 +185,26 @@ fn action_header(s: &Ui, t: &ResolvedTheme) -> El {
         )
 }
 
+fn application_locations(apps: &[dupin_mac::workspace::Application]) -> Vec<Option<String>> {
+    let names: Vec<_> = apps.iter().map(|app| app.name.to_lowercase()).collect();
+    let mut counts = std::collections::HashMap::new();
+    for name in &names {
+        *counts.entry(name).or_insert(0) += 1;
+    }
+    apps.iter()
+        .zip(&names)
+        .map(|(app, name)| {
+            if counts[name] > 1 {
+                app.path
+                    .parent()
+                    .map(|parent| dupin_core::item::tilde(&parent.to_string_lossy()))
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
 fn action_list(s: &Ui, t: &ResolvedTheme, accent: Color) -> El {
     let screen = s.action_screen.as_ref().unwrap();
     match &screen.stage {
@@ -205,6 +225,7 @@ fn action_list(s: &Ui, t: &ResolvedTheme, accent: Color) -> El {
                     )
                 }
                 ApplicationState::Ready(apps) => {
+                    let locations = application_locations(apps);
                     list = list.child(
                         col()
                             .w_full()
@@ -229,10 +250,25 @@ fn action_list(s: &Ui, t: &ResolvedTheme, accent: Color) -> El {
                                     .hover(if on { accent } else { t.hover })
                                     .child(icon)
                                     .child(
-                                        text(&app.name)
-                                            .font(t.font(type_::BODY))
-                                            .color(if on { t.selected_text } else { t.text })
-                                            .grow(1.0),
+                                        col()
+                                            .grow(1.0)
+                                            .min_w(0.0)
+                                            .child(
+                                                text(&app.name)
+                                                    .font(t.font(type_::BODY))
+                                                    .color(if on { t.selected_text } else { t.text })
+                                                    .truncate(),
+                                            )
+                                            .children(locations[index].as_deref().map(|location| {
+                                                text(location)
+                                                    .font(t.font(type_::LABEL))
+                                                    .color(if on {
+                                                        t.selected_text
+                                                    } else {
+                                                        t.text_secondary
+                                                    })
+                                                    .truncate()
+                                            })),
                                     )
                                     .child(
                                         text(if app.default { "Default" } else { "" })
@@ -810,6 +846,41 @@ pub fn theme_preview(theme: &dupin_core::config::Theme, dark: bool, avail_w: f32
 #[cfg(test)]
 mod theme_tests {
     use super::*;
+    #[test]
+    fn duplicate_application_names_include_their_locations() {
+        let home = std::env::var("HOME").unwrap_or_default();
+        let user_applications = std::path::Path::new(&home).join("Applications");
+        let apps = vec![
+            dupin_mac::workspace::Application {
+                path: "/Applications/Viewer.app".into(),
+                name: "Viewer".into(),
+                default: false,
+            },
+            dupin_mac::workspace::Application {
+                path: user_applications.join("Viewer.app"),
+                name: "viewer".into(),
+                default: false,
+            },
+            dupin_mac::workspace::Application {
+                path: "/Applications/Other.app".into(),
+                name: "Other".into(),
+                default: true,
+            },
+        ];
+        assert_eq!(
+            application_locations(&apps),
+            vec![
+                Some("/Applications".into()),
+                Some(if home.is_empty() {
+                    "Applications".into()
+                } else {
+                    "~/Applications".into()
+                }),
+                None,
+            ]
+        );
+    }
+
     #[test]
     fn miniature_fits_both_axes_for_custom_geometry() {
         for width in [400, 680, 900, 1200] {
