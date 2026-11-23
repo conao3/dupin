@@ -312,6 +312,8 @@ pub struct Ui {
     accessibility_after_close: bool,
     /// Actions handed to Launch Services that haven't returned yet; a relaunch waits for them.
     running: Arc<AtomicUsize>,
+    running_hotkey_commands: Arc<AtomicUsize>,
+    hotkey_commands: Arc<crate::hotkey::command::Runner>,
     updater: crate::update::Updater,
     me: AppHandle<Ui>,
     prefs: AppHandle<crate::prefs::Prefs>,
@@ -489,6 +491,8 @@ impl Ui {
             action_screen: None,
             next_lookup: 0,
             notice_until: None,
+            running_hotkey_commands: Arc::default(),
+            hotkey_commands: Arc::default(),
             acknowledged_config: config.clone(),
             session: Session::new(history, registration.registry)
                 .expect("built-in command registration is valid"),
@@ -710,10 +714,12 @@ impl Ui {
 
     pub fn activate_hotkey(&mut self, shortcut: &rune::Shortcut, tx: &mut Tx) {
         use crate::hotkey::{LauncherShortcut, Target};
+        use dupin_core::config::HotkeyTarget;
+
         match self.configuration.hotkey.target(shortcut) {
             Some(Target::Launcher(LauncherShortcut::Panel)) => self.toggle(tx),
             Some(Target::Launcher(LauncherShortcut::Selection)) => self.read_selection(tx),
-            Some(Target::Configured(dupin_core::config::HotkeyTarget::App {
+            Some(Target::Configured(HotkeyTarget::App {
                 bundle_id,
                 hide_if_frontmost,
             })) => {
@@ -725,8 +731,48 @@ impl Ui {
                     hide_if_frontmost,
                 });
             }
+            Some(Target::Configured(HotkeyTarget::Command { command })) => {
+                self.run_hotkey_command(shortcut, command, tx);
+            }
             None => (),
         }
+    }
+
+    fn run_hotkey_command(&mut self, shortcut: &rune::Shortcut, command: String, tx: &mut Tx) {
+        if self.running_hotkey_commands.load(Ordering::Relaxed) >= 4 {
+            self.show_notice("Four hotkey commands are already running.".into(), tx);
+            return;
+        }
+
+        let panel = self.me.clone();
+        let keys = shortcut.keycaps().join("");
+        let busy = Busy::new(self.running_hotkey_commands.clone());
+        let runner = self.hotkey_commands.clone();
+        if let Err(error) = std::thread::Builder::new()
+            .name("dupin-hotkey-command".into())
+            .spawn(move || {
+                runner.run(&command, move |result| {
+                    drop(busy);
+                    if let Err(error) = result {
+                        panel.update(move |ui, tx| {
+                            ui.show_notice(format!("The {keys} command failed: {error}"), tx);
+                        });
+                    }
+                });
+            })
+        {
+            self.show_notice(
+                format!(
+                    "Couldn't start the {} command: {error}",
+                    shortcut.keycaps().join("")
+                ),
+                tx,
+            );
+        }
+    }
+
+    pub fn stop_hotkey_commands(&mut self, _: &mut Tx) {
+        self.hotkey_commands.stop();
     }
 
     fn read_selection(&mut self, tx: &mut Tx) {

@@ -35,9 +35,9 @@ In Settings → General → Display, choose Mouse pointer (`"mouse"`, the defaul
 
 In Settings → General, turn **Launch at login** on or off. If macOS requires approval, choose **Open Login Items** and allow Dupin in System Settings. Dupin refreshes the status when you return. This setting is managed by macOS and is available in the signed app bundle outside the Nix store.
 
-## App hotkeys
+## Hotkeys
 
-Add a table to `config.toml` for each shortcut, using the app's macOS bundle identifier.
+Add a table to `config.toml` for each shortcut. An app binding uses the app's macOS bundle identifier.
 
 ```toml
 [bindings."ctrl+alt+c"]
@@ -45,6 +45,18 @@ target = "app"
 bundle_id = "com.apple.calculator"
 hide_if_frontmost = true # optional, defaults to false
 ```
+
+A command binding runs a shell command line.
+
+```toml
+[bindings."alt+cmd+g"]
+target = "command"
+command = "dupin open --query 'gh '"
+```
+
+Dupin runs commands in the background from your home directory using `$SHELL -lc` (with `/bin/zsh` as the fallback). Standard input is closed. Successful commands run silently. On failure, Dupin shows a notice with the error or exit status and up to four lines from the end of stderr. Up to four commands can run at a time.
+
+Dupin stops active command groups after five minutes or when it quits or relaunches. A background job can keep running after its shell exits. Redirect that job's standard error if it needs to keep writing after Dupin quits.
 
 Each shortcut must be distinct from the panel and selection shortcuts and other bindings. Edits reload automatically. Dupin reports clashes in Settings and in the panel, keeping the active shortcuts.
 
