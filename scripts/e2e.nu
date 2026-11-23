@@ -6,6 +6,7 @@
 # Snapshots hold whatever the panel lists, so run this only on a disposable machine.
 
 use e2e-recording.nu record
+use e2e-state.nu is-focused-query
 
 # Run the scenario against `app`, keeping each step's last agent-desktop reply, a snapshot and a
 # screenshot per stage, and Dupin's log in `out`.
@@ -55,10 +56,11 @@ def "main run" [app: path, --out: path = 'target/e2e', --record] {
     if (open --raw $log | lines | any {|line| $line =~ '^dupin: backdrop (shader|pipeline)' }) {
         error make {msg: $"the backdrop shader failed; see ($log)"}
     }
-    print 'e2e: the panel opened Calculator, and Settings showed its pages'
+    print 'e2e: Quick Look returned to the query, the panel opened Calculator, and Settings showed its pages'
 }
 
 def scenario [out: path] {
+    let log = $out | path join dupin.log
     ad $out press-hotkey press alt+space | ignore
     let focused = {|r| $r.ok and 'focused' in ($r.data?.match?.states? | default []) }
     poll $out field $focused find --app Dupin --role textfield --first
@@ -86,6 +88,31 @@ def scenario [out: path] {
     let found = {|r| $r.ok and $r.data?.match? != null }
     poll $out result $found find --app Dupin --name $row --exact --first
     snap $out results
+
+    ad $out preview-shortcut press cmd+y | ignore
+    # Quick Look is visible in recordings but absent from Dupin's AX window list.
+    wait-for-log $log 'dupin-trace: quick-look shown visible=true key=true'
+    snap $out quick-look
+    let left_before = open --raw $log | lines | where {|line| $line | str contains 'dupin-trace: key Left ' } | length
+    let closed_before = open --raw $log | lines | where {|line| $line | str contains 'dupin-trace: quick-look picker input visible=false key=false' } | length
+    ad $out close-preview press escape | ignore
+    let restored = {|r| is-focused-query $r calculator }
+    (poll
+        $out
+        quick-look-restored
+        $restored
+        find
+        --app
+        Dupin
+        --role
+        textfield
+        --first
+    )
+    ^osascript -e 'tell application "System Events" to key code 123'
+    wait-for-log --after $left_before $log 'dupin-trace: key Left '
+    wait-for-log --after $closed_before $log 'dupin-trace: quick-look picker input visible=false key=false'
+    ^osascript -e 'tell application "System Events" to key code 124'
+    snap $out quick-look-restored
 
     let before = poll $out before-return {|r| $r.ok } list-apps
     if (mentions $before Calculator) {
@@ -199,6 +226,57 @@ def scenario [out: path] {
     )
     poll $out settings-window-again $settings list-windows --app Dupin
     snap $out settings-appearance
+
+    ad $out close-settings press cmd+w | ignore
+    ad $out settings-search-hotkey press alt+space | ignore
+    (poll
+        $out
+        settings-search-field
+        $focused
+        find
+        --app
+        Dupin
+        --role
+        textfield
+        --first
+    )
+    ^osascript -e 'tell application "System Events"
+        repeat with typedKey in characters of "dupin settings"
+            keystroke (typedKey as text)
+            delay 0.12
+        end repeat
+    end tell'
+    (poll
+        $out
+        settings-search-query
+        {|r| $r.ok and $r.data?.match?.value? == 'dupin settings' }
+        find
+        --app
+        Dupin
+        --role
+        textfield
+        --first
+    )
+    (poll
+        $out
+        settings-search-result
+        $found
+        find
+        --app
+        Dupin
+        --name
+        'Dupin Settings Preferences'
+        --exact
+        --first
+    )
+    let log = $out | path join dupin.log
+    let requests_before = open --raw $log | lines | where {|line| $line | str contains 'dupin-trace: settings requested ' } | length
+    let closed_before = open --raw $log | lines | where {|line| $line | str contains 'dupin-trace: settings panel closed ' } | length
+    ad $out open-settings-result press return | ignore
+    wait-for-log --after $requests_before $log 'dupin-trace: settings requested '
+    wait-for-log --after $closed_before $log 'dupin-trace: settings panel closed '
+    poll $out settings-from-result $settings list-windows --app Dupin
+    snap $out settings-from-result
 }
 
 # Run agent-desktop, keep its reply in <out>/<name>.json, and return it parsed.
@@ -230,9 +308,14 @@ def --wrapped poll [
     error make {msg: $"timed out waiting for ($name): ($reply | to json --raw)"}
 }
 
-def wait-for-log [log: path, line: string, --tries: int = 30] {
+def wait-for-log [
+    log: path
+    line: string
+    --tries: int = 30
+    --after: int = 0
+] {
     for attempt in 1..$tries {
-        if ($log | path exists) and (open --raw $log | str contains $line) { return }
+        if ($log | path exists) and ((open --raw $log | lines | where {|entry| $entry | str contains $line } | length) > $after) { return }
         sleep 1sec
     }
     error make {msg: $"timed out waiting for ($line) in ($log)"}
