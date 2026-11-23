@@ -208,13 +208,18 @@ impl Session {
         })
     }
 
-    pub fn set_commands(&mut self, commands: CommandRegistry) -> Result<(), crate::CommandError> {
+    /// Replace the command registry, returning effects if the active command disappears.
+    pub fn set_commands(&mut self, commands: CommandRegistry) -> Result<Vec<Effect>, crate::CommandError> {
         commands.validate()?;
-        if !commands.contains(&self.command) {
-            return Err(crate::CommandError::ActiveCommandRemoved(self.command.clone()));
+        if commands.contains(&self.command) {
+            self.commands = commands;
+            return Ok(Vec::new());
         }
+        self.remember_query(false);
         self.commands = commands;
-        Ok(())
+        let mut effects = vec![Effect::ClearQuery];
+        effects.extend(self.reset_to_default());
+        Ok(effects)
     }
 
     /// The same, with a clock in Unix seconds other than the system's.
@@ -232,6 +237,9 @@ impl Session {
 
     /// Capture only settled content belonging to the current search generation.
     pub fn capture(&self) -> Result<crate::snapshots::Snapshot, String> {
+        if self.command().private_results {
+            return Err("This search cannot be saved as a snapshot.".into());
+        }
         if self.results != Results::Done || self.items.is_empty() {
             return Err("Wait for the current search to finish before saving.".into());
         }
@@ -258,7 +266,11 @@ impl Session {
     pub fn restore(&mut self, saved: &crate::snapshots::Snapshot) -> Result<Vec<Effect>, String> {
         saved.validate()?;
         let command = CommandId::new(saved.mode.clone()).map_err(|_| "Invalid saved mode.")?;
-        if !self.commands.contains(&command) {
+        if self
+            .commands
+            .command(&command)
+            .is_none_or(|spec| spec.private_results)
+        {
             return Err("The source command is unavailable. Saved content remains readable.".into());
         }
         self.clear_results();
@@ -467,8 +479,6 @@ impl Session {
         {
             self.deleting = false;
             self.before_deletion = None;
-            self.items.clear();
-            self.selected = 0;
             self.query = term.to_owned();
             let mut effects = vec![Effect::ReplaceQuery(self.query.clone())];
             effects.extend(self.switch(command, true));
@@ -749,7 +759,7 @@ impl Session {
         }
     }
     #[cfg(test)]
-    pub(crate) fn deliver(&mut self, delivery: Delivery) -> bool {
+    fn deliver(&mut self, delivery: Delivery) -> bool {
         self.deliver_from(self.command.clone(), delivery)
     }
     pub fn deliver_from(&mut self, origin: CommandId, delivery: Delivery) -> bool {
@@ -895,6 +905,10 @@ impl Session {
     /// Back to an empty default-command search, as the panel should look the next time it shows.
     pub fn reset(&mut self) -> Vec<Effect> {
         self.remember_query(false);
+        self.reset_to_default()
+    }
+
+    fn reset_to_default(&mut self) -> Vec<Effect> {
         self.renaming = None;
         self.recalled = None;
         self.deleting = false;
@@ -934,6 +948,9 @@ impl Session {
     }
 
     fn record_query(&mut self, query: String) {
+        if self.command().private_results {
+            return;
+        }
         let previous = self
             .queries
             .iter()
