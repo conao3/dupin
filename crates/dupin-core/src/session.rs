@@ -10,9 +10,12 @@ use std::sync::{Arc, RwLock, RwLockReadGuard};
 use crate::file_query::{FileKind, FileQuery};
 use crate::item::Transfer;
 use crate::searcher::Delivery;
-use crate::{Action, ActionDisposition, CommandId, CommandRegistry, History, Item, ItemAction, Payload};
+use crate::{
+    Action, ActionDisposition, CommandId, CommandRegistry, History, Item, ItemAction, Page, Payload,
+};
 
 const QUERY_HISTORY_LIMIT: usize = 100;
+const MAX_PAGE_DEPTH: usize = 8;
 
 /// Keys the session gives meaning to. The UI maps raw keys onto these.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -40,6 +43,8 @@ pub enum Effect {
         generation: u64,
         query: String,
         folder: Option<PathBuf>,
+        /// The pushed view to search, if any.
+        page: Option<Page>,
     },
     /// Stop whatever search is running; nothing should arrive for the current results.
     CancelSearch,
@@ -147,12 +152,19 @@ pub struct Session {
     queries: VecDeque<(CommandId, String)>,
     renaming: Option<Renaming>,
     destination: Option<Destination>,
-    browsing: Vec<Visit>,
+    visits: Vec<Visit>,
+}
+
+#[derive(Debug)]
+enum SearchLocation {
+    Command,
+    Folder(PathBuf),
+    Page(Page),
 }
 
 #[derive(Debug)]
 struct Visit {
-    folder: Option<PathBuf>,
+    location: SearchLocation,
     command: CommandId,
     explicit: bool,
     query: String,
@@ -165,7 +177,7 @@ struct SearchState {
     command: CommandId,
     explicit: bool,
     query: String,
-    folder: Option<PathBuf>,
+    location: SearchLocation,
     items: Vec<Item>,
     origins: Vec<CommandId>,
     providers: BTreeMap<CommandId, ProviderState>,
@@ -241,7 +253,7 @@ impl SearchState {
             command,
             explicit,
             query: String::new(),
-            folder: None,
+            location: SearchLocation::Command,
             items: Vec::new(),
             origins: Vec::new(),
             providers: BTreeMap::new(),
@@ -369,7 +381,7 @@ impl Session {
             queries: VecDeque::new(),
             renaming: None,
             destination: None,
-            browsing: Vec::new(),
+            visits: Vec::new(),
         })
     }
 
@@ -377,6 +389,7 @@ impl Session {
     pub fn set_commands(&mut self, commands: CommandRegistry) -> Result<Vec<Effect>, crate::CommandError> {
         commands.validate()?;
         if commands.contains(&self.search.command)
+            && self.visits.iter().all(|visit| commands.contains(&visit.command))
             && self
                 .destination
                 .as_ref()
@@ -412,6 +425,9 @@ impl Session {
     pub fn capture(&self) -> Result<crate::snapshots::Snapshot, String> {
         if self.destination.is_some() {
             return Err("Finish choosing a destination before saving.".into());
+        }
+        if self.page().is_some() {
+            return Err("A view opened from a result can’t be saved yet.".into());
         }
         if self.command().private_results {
             return Err("This search cannot be saved as a snapshot.".into());
@@ -455,8 +471,8 @@ impl Session {
         self.clear_results();
         self.renaming = None;
         self.destination = None;
-        self.browsing.clear();
-        self.search.folder = None;
+        self.visits.clear();
+        self.search.location = SearchLocation::Command;
         self.search.command = command;
         self.search.explicit = saved.explicit || self.search.command != *self.commands.default();
         self.search.query = saved.query.clone();
@@ -499,7 +515,18 @@ impl Session {
 
     /// The folder being browsed, if any.
     pub fn folder(&self) -> Option<&Path> {
-        self.search.folder.as_deref()
+        match &self.search.location {
+            SearchLocation::Folder(folder) => Some(folder),
+            _ => None,
+        }
+    }
+
+    /// The top view, if one has been opened from a result.
+    pub fn page(&self) -> Option<&Page> {
+        match &self.search.location {
+            SearchLocation::Page(page) => Some(page),
+            _ => None,
+        }
     }
 
     pub fn items(&self) -> &[Item] {
@@ -651,6 +678,7 @@ impl Session {
         }
         match action.action {
             Action::Browse(folder) => return self.browse(folder),
+            Action::Push(page) => return self.push(page),
             Action::Rename(path) => return self.begin_rename(path),
             Action::ChooseDestination { path, transfer } => return self.begin_destination(path, transfer),
             _ => {}
@@ -727,6 +755,7 @@ impl Session {
         }
         self.search.recalled = None;
         if route_keyword
+            && self.page().is_none()
             && self.search.command == *self.commands.default()
             && let Some((command, term)) = self.keyword_query(text)
         {
@@ -804,6 +833,7 @@ impl Session {
                     self.browse(folder.clone())
                 }
             }
+            Intent::Space if self.page().is_some() => return None,
             Intent::Space if empty => self
                 .commands
                 .space_on_empty(&self.search.command)
@@ -816,7 +846,7 @@ impl Session {
                 effects.extend(self.switch(command, true));
                 effects
             }
-            Intent::Backspace if empty && self.folder().is_some() => self.leave_folder(),
+            Intent::Backspace if empty && !self.visits.is_empty() => self.leave_view(),
             Intent::Backspace if empty && self.search.command != *self.commands.default() => {
                 self.switch(self.commands.default().clone(), false)
             }
@@ -825,6 +855,7 @@ impl Session {
             Intent::Up
                 if self.search.recalled.is_some()
                     || (empty
+                        && self.page().is_none()
                         && self.search.selected == 0
                         && !(self.search.explicit
                             && self.command().query_eligibility.allows(&self.search.query))) =>
@@ -858,6 +889,7 @@ impl Session {
                 let item = item.clone();
                 self.activate(&item, action)
             }
+            Intent::Dismiss if self.page().is_some() => self.leave_view(),
             Intent::Dismiss => self.dismiss(),
         })
     }
@@ -879,12 +911,32 @@ impl Session {
         let Some(browser) = self.commands.browser().cloned() else {
             return Vec::new();
         };
+        self.visit(browser, SearchLocation::Folder(folder))
+    }
+
+    fn push(&mut self, page: Page) -> Vec<Effect> {
+        let previous_pages = self
+            .visits
+            .iter()
+            .filter(|visit| matches!(visit.location, SearchLocation::Page(_)))
+            .count();
+        if previous_pages + usize::from(self.page().is_some()) >= MAX_PAGE_DEPTH {
+            return Vec::new();
+        }
+        let Some(origin) = self.search.origins.get(self.search.selected).cloned() else {
+            return Vec::new();
+        };
+        self.remember_query(true);
+        self.visit(origin, SearchLocation::Page(page))
+    }
+
+    fn visit(&mut self, command: CommandId, location: SearchLocation) -> Vec<Effect> {
         let selected = self
             .selected_item()
             .map(|item| (self.search.origins[self.search.selected].clone(), item.id.clone()));
-        self.browsing.push(Visit {
-            folder: self.search.folder.replace(folder),
-            command: std::mem::replace(&mut self.search.command, browser),
+        self.visits.push(Visit {
+            location: std::mem::replace(&mut self.search.location, location),
+            command: std::mem::replace(&mut self.search.command, command),
             explicit: std::mem::replace(&mut self.search.explicit, true),
             query: std::mem::take(&mut self.search.query),
             selected,
@@ -894,9 +946,9 @@ impl Session {
         effects
     }
 
-    fn leave_folder(&mut self) -> Vec<Effect> {
-        let visit = self.browsing.pop().expect("leaving a browsed folder");
-        self.search.folder = visit.folder;
+    fn leave_view(&mut self) -> Vec<Effect> {
+        let visit = self.visits.pop().expect("returning to a previous view");
+        self.search.location = visit.location;
         self.search.command = visit.command;
         self.search.explicit = visit.explicit;
         self.search.query = visit.query;
@@ -911,8 +963,14 @@ impl Session {
         self.search.recalled = None;
         self.search.deleting = false;
         self.search.before_deletion = None;
+        let was_searching = matches!(self.search.results, Results::Searching { .. });
         self.clear_results();
-        self.search()
+        let effects = self.search();
+        if was_searching && effects.is_empty() {
+            vec![Effect::CancelSearch]
+        } else {
+            effects
+        }
     }
 
     fn move_selection(&mut self, intent: Intent) -> Vec<Effect> {
@@ -934,6 +992,9 @@ impl Session {
         self.commands.command(id)
     }
     pub(crate) fn provider_ids(&self) -> Vec<CommandId> {
+        if self.page().is_some() {
+            return vec![self.search.command.clone()];
+        }
         let candidates = if self.search.explicit {
             vec![self.search.command.clone()]
         } else {
@@ -1251,7 +1312,7 @@ impl Session {
             self.search = destination.original;
         }
         self.remember_query(false);
-        self.browsing.clear();
+        self.visits.clear();
         if let Some(commands) = commands {
             self.commands = commands;
         }
@@ -1272,7 +1333,7 @@ impl Session {
     }
 
     fn remember_query(&mut self, activated: bool) {
-        if self.folder().is_some() {
+        if !matches!(self.search.location, SearchLocation::Command) {
             return;
         }
         if activated {
@@ -1400,7 +1461,8 @@ impl Session {
                 command,
                 generation: self.search.generation,
                 query: query.clone(),
-                folder: self.search.folder.clone(),
+                folder: self.folder().map(Path::to_path_buf),
+                page: self.page().cloned(),
             })
             .collect()
     }

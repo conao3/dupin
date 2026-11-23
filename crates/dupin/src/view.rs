@@ -780,10 +780,13 @@ fn header(s: &Ui, t: &ResolvedTheme, accent: Color) -> El {
     let presentation = &s.session.command().presentation;
     let renaming = s.session.renaming().is_some();
     let destination = s.session.destination();
+    let page = s.session.page();
     let placeholder = if renaming {
         "Name"
     } else if destination.is_some() {
         "Search folders"
+    } else if page.is_some() {
+        "Filter"
     } else {
         presentation.placeholder.as_str()
     };
@@ -818,12 +821,26 @@ fn header(s: &Ui, t: &ResolvedTheme, accent: Color) -> El {
         .session
         .folder()
         .map(|folder| folder.file_name().unwrap_or(folder.as_os_str()).to_string_lossy());
+    let page_chip = page.map(|page| {
+        let mut title: String = page.title.chars().take(40).collect();
+        if page.title.chars().count() > 40 {
+            title.pop();
+            title.push('…');
+        }
+        match presentation.chip.as_deref() {
+            Some(chip) => format!("{chip} › {title}"),
+            None => title,
+        }
+    });
     let chip = if let Some(chip) = destination_chip.as_deref() {
         Some(chip)
     } else if renaming {
         Some("Rename")
     } else {
-        folder.as_deref().or(presentation.chip.as_deref())
+        folder
+            .as_deref()
+            .or(page_chip.as_deref())
+            .or(presentation.chip.as_deref())
     };
     bar = if let Some(chip) = chip {
         bar.child(
@@ -922,7 +939,8 @@ fn hint(s: &Ui) -> Option<&str> {
             .then_some("No matching folders");
     }
     let presentation = &s.session.command().presentation;
-    let empty = s.session.query().trim().is_empty() && s.session.folder().is_none();
+    let empty =
+        s.session.query().trim().is_empty() && s.session.folder().is_none() && s.session.page().is_none();
     match s.session.results() {
         Results::Idle if empty => presentation.empty_hint.as_deref(),
         Results::Done if s.session.failures().next().is_none() => {

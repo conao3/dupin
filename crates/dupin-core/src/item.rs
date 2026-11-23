@@ -2,6 +2,18 @@ use std::path::PathBuf;
 
 pub use dupin_plugin_protocol::View;
 
+/// A view a provider opens over its own results. The session searches the same command for
+/// it, and the provider tells the views apart by `view`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Page {
+    pub view: String,
+    /// Shown beside the command's chip while the view is open.
+    pub title: String,
+    /// Opaque to the session: what the provider asked to be given back with each search.
+    pub context: Option<serde_json::Value>,
+}
+
+/// Whether an item action completes the pick or leaves the current search available.
 /// What running a result does. Providers decide; the platform layer carries it out.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Action {
@@ -52,6 +64,8 @@ pub enum Action {
     Preview(PathBuf),
     /// Open the host application's preferences.
     OpenPreferences,
+    /// Show another view of the same command inside the panel.
+    Push(Page),
     ScriptArguments(PathBuf),
     RunScript(crate::script::ScriptRun),
     ArrangeWindow(crate::window_management::Layout),
