@@ -108,7 +108,6 @@ mod tests {
                     "open-with",
                     "reveal",
                     "quick-look",
-                    "copy-path",
                     "copy-name",
                     "rename",
                     "move-to",

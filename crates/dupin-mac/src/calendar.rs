@@ -323,6 +323,7 @@ fn event_url(event: &Event, zone: &NSTimeZone) -> String {
 
 fn row(id: &str, title: &str, subtitle: String, open: Option<(&str, String)>) -> Item {
     Item {
+        payload: Default::default(),
         id: id.into(),
         view: View::Text {
             title: title.into(),

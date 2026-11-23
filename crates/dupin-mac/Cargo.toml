@@ -52,6 +52,7 @@ objc2-app-kit = { workspace = true, features = [
 	"NSPasteboardItem",
 	"NSResponder",
 	"NSScreen",
+	"NSSharingService",
 	"NSView",
 	"NSWindow",
 	"NSWorkspace",

@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::sync::{Arc, RwLock};
 
 use dupin_core::config::{Config, MAPS_SEARCH_TEMPLATE};
-use dupin_core::{Action, Item, ItemAction, Provider, ProviderError, Request, View};
+use dupin_core::{Action, Item, ItemAction, Payload, Provider, ProviderError, Request, View};
 use objc2_foundation::{NSString, NSURL};
 
 const MAX_KEYWORD_BYTES: usize = 32;
@@ -46,6 +46,13 @@ impl SearchTarget {
 }
 
 impl WebCatalog {
+    pub fn search_urls<'a>(&'a self, query: &'a str) -> impl Iterator<Item = (&'a str, &'a str, String)> {
+        self.searches.iter().filter_map(move |(keyword, search)| {
+            let url = fill_template(&search.url, query)?;
+            Some((keyword.as_str(), search.name.as_str(), url))
+        })
+    }
+
     pub fn compile(config: &Config, is_reserved: impl Fn(&str) -> bool) -> (Self, Option<String>) {
         let mut catalog = Self::default();
         let mut problems = Vec::new();
@@ -264,6 +271,7 @@ impl ValidatedSearch {
         let url = fill_template(&self.url, query)?;
         Some(Item {
             id: format!("web:{keyword}"),
+            payload: Payload::text(query),
             view: View::Text {
                 title,
                 subtitle: keyword.to_owned(),
@@ -342,14 +350,17 @@ mod tests {
 
         let item = collect(&provider, "g", 5).pop().unwrap();
         assert_eq!(item.display_title(), "Search Google");
+        assert!(item.payload.is_empty());
         assert_eq!(item.completion.as_deref(), Some("g "));
         assert_eq!(url(&item), "https://www.google.com/search?q=");
 
         let item = collect(&provider, "g ", 5).pop().unwrap();
         assert_eq!(item.completion.as_deref(), Some("g "));
+        assert!(item.payload.is_empty());
 
         let item = collect(&provider, "g  rust lifetimes", 5).pop().unwrap();
         assert_eq!(item.display_title(), "Search Google for rust lifetimes");
+        assert_eq!(item.payload.nonblank_text(), Some("rust lifetimes"));
         assert_eq!(item.completion, None);
         assert_eq!(url(&item), "https://www.google.com/search?q=rust%20lifetimes");
         assert!(collect(&provider, "", 5).is_empty());
@@ -381,6 +392,28 @@ mod tests {
             url(&item),
             "https://www.google.com/search?q=%E6%97%A5%E6%9C%AC%E8%AA%9E%20%2B%26%2F%23%3F"
         );
+    }
+
+    #[test]
+    fn configured_search_receivers_use_the_same_templates_as_keyword_search() {
+        let (catalog, _) = compile(&Config::default());
+        let query = "日本語 +&/#?";
+        let result = keyword_item(&catalog, &format!("g {query}")).unwrap();
+        let mut receivers = crate::receivers::for_payload(&result.payload, &catalog).into_iter();
+        assert_eq!(
+            receivers.next().unwrap(),
+            ItemAction::new("copy-text", "Copy", Action::Copy(query.into()))
+        );
+        assert_eq!(receivers.len(), catalog.searches.len());
+        for receiver in receivers {
+            let keyword = receiver.id.strip_prefix("web:").unwrap();
+            let item = keyword_item(&catalog, &format!("{keyword} {query}")).unwrap();
+            assert_eq!(
+                receiver,
+                ItemAction::new(&receiver.id, &receiver.title, Action::OpenUrl(url(&item).into()),)
+            );
+        }
+        assert_eq!(catalog.search_urls(&"x".repeat(MAX_TEMPLATE_BYTES)).count(), 0);
     }
 
     #[test]
@@ -462,6 +495,10 @@ mod tests {
         assert_eq!(all[0].display_title(), "Search Google for rust");
         assert_eq!(all[1].display_title(), "Search GitHub for rust");
         assert_eq!(all[2].display_title(), "Search YouTube for rust");
+        assert!(
+            all.iter()
+                .all(|item| item.payload.nonblank_text() == Some("rust"))
+        );
         assert_eq!(collect(&provider, "rust", 2).len(), 2);
         assert!(collect(&provider, "  ", 10).is_empty());
         assert!(collect(&provider, "rust", 0).is_empty());

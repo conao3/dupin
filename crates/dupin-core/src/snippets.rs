@@ -4,7 +4,7 @@
 use std::sync::{Arc, RwLock};
 
 use crate::config::Config;
-use crate::{Action, Item, ItemAction, Provider, ProviderError, Request, View, fuzzy};
+use crate::{Action, Item, ItemAction, Payload, Provider, ProviderError, Request, View, fuzzy};
 
 const MAX_KEYWORD_BYTES: usize = 32;
 const MAX_NAME_CHARS: usize = 80;
@@ -180,6 +180,11 @@ impl SnippetCatalog {
         };
         Item {
             id: format!("snippet:{}", entry.keyword),
+            payload: if next_placeholder(&entry.text, 0).is_none() {
+                Payload::text(entry.text.clone())
+            } else {
+                Payload::default()
+            },
             view: View::Text {
                 title: entry.title.clone(),
                 subtitle: format!("{}  ·  {}", entry.keyword, preview(&entry.text)),

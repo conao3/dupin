@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
-use dupin_core::{Action, Item, ItemAction, Provider, ProviderError, Request, View};
+use dupin_core::{Action, Item, ItemAction, Payload, Provider, ProviderError, Request, View};
 use fend_core::{Context, ExchangeRateFnV2, ExchangeRateFnV2Options, Interrupt, SpanKind};
 
 mod currency;
@@ -67,6 +67,10 @@ impl Provider for Calculator {
             };
             emit(vec![Item {
                 id: "answer".into(),
+                payload: Payload {
+                    text: copy.clone(),
+                    ..Payload::default()
+                },
                 view: View::Pair {
                     source: source.into(),
                     result,

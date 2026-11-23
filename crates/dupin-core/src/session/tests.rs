@@ -536,8 +536,8 @@ fn actions_run_the_named_result_even_after_selection_moves() {
         }]
     );
     s.intent(Intent::Down);
-    let effects = s.run_key_action(&key, "copy-path");
-    assert_eq!(effects[0], Effect::Run(Action::Copy("/x/notes.md".into())));
+    let effects = s.run_key_action(&key, "open");
+    assert_eq!(effects[0], Effect::Run(Action::Open("/x/notes.md".into())));
     assert!(effects.contains(&Effect::Hide));
     assert!(s.items().is_empty());
 }
@@ -640,6 +640,41 @@ fn running_an_inline_script_records_the_pick_and_query_before_dismissal() {
     assert_eq!(s.query(), "fixture");
     assert!(s.history().boost(&id, "fixture", 0) > 0);
     assert_eq!(s.queries, [(app_command(), "fixture".into())]);
+}
+
+#[test]
+fn receivers_require_the_captured_result_and_payload() {
+    let mut s = session();
+    let generation = searched(&s.set_query("note")).1;
+    let mut result = item("notes.md");
+    result.actions.clear();
+    result.primary = None;
+    let payload = result.payload.clone();
+    s.deliver(Delivery::Batch {
+        generation,
+        items: vec![result, item("other.md")],
+    });
+    let key = s.result_key(0);
+    assert_eq!(
+        s.intent(Intent::Open).unwrap(),
+        [Effect::ShowActions {
+            id: key.clone(),
+            generation,
+            confirmation: None,
+        }]
+    );
+
+    let copy = ItemAction::new("copy-path", "Copy path", Action::Copy("/x/notes.md".into()));
+    assert!(
+        s.run_key_receiver(&key, &crate::Payload::text("different"), copy.clone())
+            .is_empty()
+    );
+    s.intent(Intent::Down);
+    let effects = s.run_key_receiver(&key, &payload, copy.clone());
+    assert_eq!(effects[0], Effect::Run(Action::Copy("/x/notes.md".into())));
+    assert!(effects.contains(&Effect::Hide));
+
+    assert!(s.run_key_receiver(&key, &payload, copy).is_empty());
 }
 
 #[test]
@@ -1057,6 +1092,7 @@ fn enter_offers_dictionary_actions_before_launching() {
         generation,
         items: vec![Item {
             id: "dictionary:serendipity".into(),
+            payload: crate::Payload::text("The occurrence of events by chance."),
             view: View::Detail {
                 title: "serendipity".into(),
                 body: "The occurrence of events by chance.".into(),

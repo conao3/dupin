@@ -10,7 +10,7 @@ use std::sync::{Arc, RwLock, RwLockReadGuard};
 use crate::file_query::{FileKind, FileQuery};
 use crate::item::Transfer;
 use crate::searcher::Delivery;
-use crate::{Action, ActionDisposition, CommandId, CommandRegistry, History, Item, ItemAction};
+use crate::{Action, ActionDisposition, CommandId, CommandRegistry, History, Item, ItemAction, Payload};
 
 const QUERY_HISTORY_LIMIT: usize = 100;
 
@@ -618,7 +618,7 @@ impl Session {
         let effects = self
             .actionable_items()
             .get(self.search.selected)
-            .filter(|item| !item.actions.is_empty())
+            .filter(|item| item.has_actions())
             .map(|_| {
                 vec![Effect::ShowActions {
                     id: self.result_key(self.search.selected),
@@ -1042,6 +1042,17 @@ impl Session {
             return Vec::new();
         }
         self.activate(&item, ItemAction::new(parent_id, "Open with", choice))
+    }
+
+    pub fn run_key_receiver(&mut self, key: &str, payload: &Payload, action: ItemAction) -> Vec<Effect> {
+        if !self.select_key(key) {
+            return Vec::new();
+        }
+        let item = self.search.items[self.search.selected].clone();
+        if &item.payload != payload {
+            return Vec::new();
+        }
+        self.activate(&item, action)
     }
 
     /// Update the search where a rename completed, including one covered by the destination picker.

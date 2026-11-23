@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::config;
 use crate::item::tilde;
-use crate::{Action, Item, ItemAction, Provider, ProviderError, Request, View};
+use crate::{Action, Item, ItemAction, Payload, Provider, ProviderError, Request, View};
 
 const TITLE_CHARS: usize = 200;
 
@@ -275,7 +275,7 @@ fn plural(count: usize, one: &str, many: &str) -> String {
 
 fn item(entry: &Entry, title: String, matched: Vec<usize>, now: u64) -> Item {
     let when = ago(now, entry.copied_at);
-    let (subtitle, icon, copy) = match &entry.content {
+    let (subtitle, icon, payload, copy) = match &entry.content {
         Content::Text(text) => {
             let lines = text.lines().count();
             let size = if lines > 1 {
@@ -283,7 +283,12 @@ fn item(entry: &Entry, title: String, matched: Vec<usize>, now: u64) -> Item {
             } else {
                 plural(text.chars().count(), "character", "characters")
             };
-            (format!("{when} · {size}"), None, Action::Copy(text.clone()))
+            (
+                format!("{when} · {size}"),
+                None,
+                Payload::text(text.clone()),
+                Action::Copy(text.clone()),
+            )
         }
         Content::Files(paths) => {
             let place = match paths.as_slice() {
@@ -296,12 +301,17 @@ fn item(entry: &Entry, title: String, matched: Vec<usize>, now: u64) -> Item {
             (
                 format!("{when} · {place}"),
                 paths.first().cloned(),
+                Payload {
+                    text: None,
+                    paths: paths.clone(),
+                },
                 Action::CopyFiles(paths.clone()),
             )
         }
     };
     Item {
         id: format!("clipboard-{}", entry.id),
+        payload,
         view: View::Text { title, subtitle },
         record_usage: false,
         icon,

@@ -13,6 +13,7 @@ mod icons;
 mod log;
 mod mcp;
 mod prefs;
+mod receivers;
 mod scripts;
 mod settings;
 mod shader;
@@ -209,6 +210,8 @@ fn main() {
         })
         .on_ready(move |window| {
             appear_instantly(window);
+            let panel = window.clone();
+            handle.update(move |ui, _| ui.set_panel_window(panel));
             install_quick_look(window, &handle, &quick_look);
             // Once per process: a launcher window is made once and kept, but be explicit.
             if !std::mem::replace(&mut registered, true) {
@@ -220,11 +223,7 @@ fn main() {
         .on_frame_encoded(trace::frame)
         .on_quit(ui::Ui::stop_child_processes)
         .on_close(ui::Ui::closed)
-        .on_focus(|s, focused, tx| {
-            if !focused && !s.preview_focus_is_active() {
-                s.dismiss(tx);
-            }
-        });
+        .on_focus(ui::Ui::focus_changed);
 
     rune::run_windows(move |_| {
         // AppKit rounds the panel and its shadow; the view also clips, for headless renders.

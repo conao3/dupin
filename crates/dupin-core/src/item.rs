@@ -32,6 +32,10 @@ pub enum Action {
     /// Open a URL with its registered handler.
     OpenUrl(String),
     Copy(String),
+    Share {
+        target: ShareTarget,
+        paths: Vec<PathBuf>,
+    },
     CopyFiles(Vec<PathBuf>),
     /// Remove one entry from the clipboard history; the system clipboard keeps its contents.
     DeleteClipboardEntry(u64),
@@ -69,6 +73,36 @@ pub enum SystemCommand {
     LogOut,
     EmptyTrash,
     ToggleDarkMode,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ShareTarget {
+    Picker,
+    Service { name: String, label: String },
+}
+
+/// The primary values a result can pass to other actions.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Payload {
+    pub text: Option<String>,
+    pub paths: Vec<PathBuf>,
+}
+
+impl Payload {
+    pub fn text(value: impl Into<String>) -> Self {
+        Self {
+            text: Some(value.into()),
+            paths: Vec::new(),
+        }
+    }
+
+    pub fn nonblank_text(&self) -> Option<&str> {
+        self.text.as_deref().filter(|text| !text.trim().is_empty())
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.paths.is_empty() && self.nonblank_text().is_none()
+    }
 }
 
 /// Whether an item action completes the pick or leaves the current search available.
@@ -138,6 +172,7 @@ pub struct Item {
     /// Unique among the results of one search; the UI keys rows by it.
     pub id: String,
     pub view: View,
+    pub payload: Payload,
     /// Participate in usage recording and history ranking.
     pub record_usage: bool,
     /// The file whose icon represents the row, if any.
@@ -166,6 +201,10 @@ impl Item {
         Item {
             id: path.to_string_lossy().into_owned(),
             view: View::Text { title, subtitle },
+            payload: Payload {
+                text: None,
+                paths: vec![path.clone()],
+            },
             record_usage: true,
             icon: Some(path.clone()),
             matched,
@@ -175,14 +214,13 @@ impl Item {
             alternate: Some("reveal".into()),
             actions: vec![
                 ItemAction::new("open", "Open", Action::Open(path.clone())),
-                ItemAction::new("reveal", "Reveal in Finder", Action::Reveal(path.clone())),
-                ItemAction::new(
-                    "copy-path",
-                    "Copy path",
-                    Action::Copy(path.to_string_lossy().into_owned()),
-                ),
+                ItemAction::new("reveal", "Reveal in Finder", Action::Reveal(path)),
             ],
         }
+    }
+
+    pub fn has_actions(&self) -> bool {
+        !self.actions.is_empty() || !self.payload.is_empty()
     }
 
     pub fn display_title(&self) -> &str {

@@ -37,6 +37,7 @@ impl Provider for ScriptsProvider {
                 };
                 let synopsis = script.header.synopsis();
                 Some(Item {
+                    payload: Default::default(),
                     id: format!("script:{}", script.path.display()),
                     view: View::Text {
                         title: script.header.title.clone(),

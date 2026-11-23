@@ -35,6 +35,7 @@ impl Provider for WindowProvider {
                     (found.score, found.positions)
                 };
                 Some(Item {
+                    payload: Default::default(),
                     id: format!("window:{id}"),
                     view: View::Text {
                         title: title.into(),

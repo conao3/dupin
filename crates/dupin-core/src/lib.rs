@@ -24,7 +24,7 @@ pub use command::{
 pub use config::{Backdrop, Config, DisplaySelection, InputSource, Position};
 pub use history::History;
 pub(crate) use item::ActionDisposition;
-pub use item::{Action, Item, ItemAction, SystemCommand, View};
+pub use item::{Action, Item, ItemAction, Payload, ShareTarget, SystemCommand, View};
 pub use provider::{Provider, ProviderError, Request};
 pub use searcher::{Delivery, Searcher};
 pub use session::{Effect, Intent, Session};

@@ -22,6 +22,7 @@ pub mod quick_look;
 mod recent;
 pub mod selection;
 mod settings_search;
+pub mod sharing;
 pub mod spotlight;
 pub mod system_commands;
 pub mod system_hotkey;

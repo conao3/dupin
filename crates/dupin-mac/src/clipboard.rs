@@ -112,6 +112,7 @@ pub fn access_item(access: Access) -> Option<Item> {
         ),
     };
     Some(Item {
+        payload: Default::default(),
         id: "clipboard-access".into(),
         view: View::Text {
             title: title.into(),

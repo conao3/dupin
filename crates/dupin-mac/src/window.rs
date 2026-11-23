@@ -34,6 +34,22 @@ pub unsafe fn appear_instantly(ns_view: NonNull<c_void>) -> bool {
     true
 }
 
+/// # Safety
+///
+/// `ns_view` must point to a live AppKit `NSView` on the main thread.
+pub unsafe fn is_key_window(ns_view: NonNull<c_void>) -> bool {
+    let Some(_main) = MainThreadMarker::new() else {
+        return false;
+    };
+    // SAFETY: The caller guarantees a live NSView for this borrow.
+    let view = unsafe { ns_view.cast::<NSView>().as_ref() };
+    view_is_key(view)
+}
+
+pub(crate) fn view_is_key(view: &NSView) -> bool {
+    view.window().is_some_and(|window| window.isKeyWindow())
+}
+
 /// A single screen's identity and bounds in AppKit points.
 pub struct DisplayGeometry {
     pub native_id: u32,

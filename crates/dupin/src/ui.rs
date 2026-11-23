@@ -12,8 +12,8 @@ use std::sync::{Arc, RwLock};
 use dupin_core::item::Transfer;
 use dupin_core::window_management::Layout as WindowLayout;
 use dupin_core::{
-    Backdrop, CommandId, Config, Delivery, DisplaySelection, Effect, History, InputSource, Intent, Position,
-    Searcher, Session,
+    Backdrop, CommandId, Config, Delivery, DisplaySelection, Effect, History, InputSource, Intent,
+    ItemAction, Position, Searcher, Session,
 };
 use dupin_mac::window_management::{self, Error as WindowError};
 use dupin_mac::{
@@ -21,6 +21,7 @@ use dupin_mac::{
     window::DisplayNotice,
 };
 use objc2_foundation::NSRect;
+use rune::raw_window_handle::RawWindowHandle;
 use rune::{
     Align, AppHandle, DisplayTarget, Image, ImageCache, Key, KeyEvent, OverlayPlacement, ScreenEdge,
     TextEdit, Tx, Waker,
@@ -34,6 +35,7 @@ const PASTE_ACCESS_NOTICE: &str = "Copied the snippet. To paste it into the fron
 // Match Spotlight's offset for the top position.
 const TOP_MARGIN: f32 = 180.0;
 pub const ICON_SIZE: f32 = 32.0;
+pub const SEND_TO: &str = "Send to…";
 
 fn panel_offsets(frame: NSRect, visible: NSRect, width: u16, position: Position) -> (f32, f32) {
     let inset = visible.origin.x - frame.origin.x + ((visible.size.width - f64::from(width)) / 2.0).max(0.0);
@@ -151,6 +153,10 @@ pub enum ActionStage {
         state: ApplicationState,
         selected: usize,
     },
+    Receivers {
+        actions: Vec<ItemAction>,
+        selected: usize,
+    },
     Confirm {
         action_id: String,
         selected: usize,
@@ -165,6 +171,8 @@ enum ActionKey {
     Run(String, String),
     Confirm,
     Choice(usize),
+    SendTo,
+    Receive(usize),
 }
 
 impl ActionScreen {
@@ -197,9 +205,15 @@ impl ActionScreen {
 
     fn selected_index(&self) -> usize {
         match &self.stage {
-            ActionStage::Applications { selected, .. } | ActionStage::Confirm { selected, .. } => *selected,
+            ActionStage::Applications { selected, .. }
+            | ActionStage::Receivers { selected, .. }
+            | ActionStage::Confirm { selected, .. } => *selected,
             ActionStage::List => self.selected,
         }
+    }
+
+    fn action_count(&self) -> usize {
+        self.item.actions.len() + usize::from(!self.item.payload.is_empty())
     }
 
     fn back(&mut self) -> ActionKey {
@@ -243,15 +257,27 @@ impl ActionScreen {
                 }
                 return ActionKey::Stay;
             }
+            ActionStage::Receivers { actions, selected } => {
+                match key {
+                    Key::Up => *selected = selected.saturating_sub(1),
+                    Key::Down => *selected = (*selected + 1).min(actions.len().saturating_sub(1)),
+                    Key::Enter if !actions.is_empty() => return ActionKey::Receive(*selected),
+                    _ => {}
+                }
+                return ActionKey::Stay;
+            }
             ActionStage::List => {}
         }
         match key {
             Key::Up => self.selected = self.selected.saturating_sub(1),
-            Key::Down => self.selected = (self.selected + 1).min(self.item.actions.len().saturating_sub(1)),
+            Key::Down => self.selected = (self.selected + 1).min(self.action_count().saturating_sub(1)),
             Key::Left | Key::Escape => return ActionKey::Back,
             Key::Enter => {
                 if let Some(action) = self.item.actions.get(self.selected) {
                     return ActionKey::Run(self.key.clone(), action.id.clone());
+                }
+                if self.selected < self.action_count() {
+                    return ActionKey::SendTo;
                 }
             }
             _ => {}
@@ -346,6 +372,8 @@ pub struct Ui {
     notice_after_close: Option<String>,
     /// Pasting has asked macOS for access once since launch; later attempts explain instead.
     paste_access_asked: bool,
+    sharing: dupin_mac::sharing::Picker,
+    panel_window: Option<rune::WindowHandle>,
     file_demotions: Arc<RwLock<Vec<String>>>,
     system_provider: Arc<dupin_mac::system_commands::SystemProvider>,
     deadlines: HashMap<CommandId, (u64, f64)>,
@@ -640,6 +668,8 @@ impl Ui {
             paste_after_close: None,
             notice_after_close: None,
             paste_access_asked: false,
+            sharing: dupin_mac::sharing::Picker::default(),
+            panel_window: None,
             file_demotions: registration.file_demotions,
             system_provider: registration.system_provider,
             deadlines: HashMap::new(),
@@ -704,6 +734,12 @@ impl Ui {
             *snippets = registration.snippets;
             changed
         };
+        if web_changed
+            && let Some(screen) = &mut self.action_screen
+            && matches!(screen.stage, ActionStage::Receivers { .. })
+        {
+            screen.stage = ActionStage::List;
+        }
         let sources = registration.registry.ids();
         self.snapshots.update(move |s, _| s.set_sources(sources));
         let effects = self
@@ -1206,6 +1242,7 @@ impl Ui {
         self.script_card = None;
         crate::trace::panel("hide", self.me.is_visible(), self.shown);
         self.action_screen = None;
+        self.sharing.close();
         if let Some(preview) = self.quick_look.borrow().as_ref() {
             preview.close();
         }
@@ -1415,6 +1452,8 @@ impl Ui {
                 ActionKey::Run(key, action) => self.pick_action(&key, &action, tx),
                 ActionKey::Confirm => self.confirm_action(tx),
                 ActionKey::Choice(index) => self.pick_application(index, tx),
+                ActionKey::SendTo => self.show_receivers(tx),
+                ActionKey::Receive(index) => self.pick_receiver(index, tx),
                 ActionKey::Stay => {
                     tx.scroll_into_view(format!("action-{}", screen.selected_index()));
                 }
@@ -1689,6 +1728,36 @@ impl Ui {
             },
         );
         self.action_screen = None;
+        self.apply(effects, tx);
+    }
+
+    pub fn show_receivers(&mut self, tx: &mut Tx) {
+        let Some(screen) = self
+            .action_screen
+            .as_mut()
+            .filter(|screen| matches!(screen.stage, ActionStage::List) && screen.is_current(&self.session))
+        else {
+            return;
+        };
+        let actions = crate::receivers::for_payload(&screen.item.payload, &self.web.read().unwrap());
+        if actions.is_empty() {
+            return;
+        }
+        screen.selected = screen.item.actions.len();
+        screen.stage = ActionStage::Receivers { actions, selected: 0 };
+        crate::trace::action_screen("receivers");
+        tx.scroll_into_view("action-0");
+    }
+
+    pub fn pick_receiver(&mut self, index: usize, tx: &mut Tx) {
+        let Some(screen) = &self.action_screen else { return };
+        let ActionStage::Receivers { actions, .. } = &screen.stage else {
+            return;
+        };
+        let Some(action) = actions.get(index) else { return };
+        let effects = self
+            .session
+            .run_key_receiver(&screen.key, &screen.item.payload, action.clone());
         self.apply(effects, tx);
     }
 
@@ -2068,6 +2137,13 @@ impl Ui {
                     }
                     dupin_core::Action::Copy(text) => tx.copy(text),
                     dupin_core::Action::Snippet { text, paste } => self.run_snippet(text, paste, tx),
+                    dupin_core::Action::Share { target, paths } => {
+                        if !rune::tooling::is_headless()
+                            && let Err(error) = self.share(target, &paths)
+                        {
+                            self.me.update(move |ui, tx| ui.show_notice(error, tx));
+                        }
+                    }
                     dupin_core::Action::OpenPreferences => self.prepare_settings(),
                     dupin_core::Action::ArrangeWindow(layout) => {
                         if self.window_management_enabled && !rune::tooling::is_headless() {
@@ -2335,11 +2411,57 @@ impl Ui {
         tx.wake_at(tx.clock() + 5.0);
     }
 
-    pub fn preview_focus_is_active(&self) -> bool {
-        self.quick_look
-            .borrow()
+    pub fn set_panel_window(&mut self, window: rune::WindowHandle) {
+        self.panel_window = Some(window);
+    }
+
+    fn share(&mut self, target: dupin_core::ShareTarget, paths: &[std::path::PathBuf]) -> Result<(), String> {
+        let window = self
+            .panel_window
             .as_ref()
-            .is_some_and(|preview| preview.panel_is_key() || preview.owner_is_key())
+            .ok_or("Couldn't find the launcher window.")?;
+        let panel = self.me.clone();
+        window.with_raw_handle(|handle| match handle.as_raw() {
+            // SAFETY: Rune lends the live launcher view for this main-thread callback.
+            RawWindowHandle::AppKit(appkit) => unsafe {
+                self.sharing.share(target, paths, appkit.ns_view, move || {
+                    panel.update(|ui, tx| ui.dismiss_if_unfocused(tx));
+                })
+            },
+            _ => Err("Couldn't find the launcher view.".into()),
+        })?
+    }
+
+    pub fn focus_changed(&mut self, focused: bool, tx: &mut Tx) {
+        if !focused {
+            self.dismiss_if_unfocused(tx);
+        }
+    }
+
+    fn dismiss_if_unfocused(&mut self, tx: &mut Tx) {
+        let auxiliary_owns_focus = self.sharing.is_active()
+            || self
+                .quick_look
+                .borrow()
+                .as_ref()
+                .is_some_and(Previewer::panel_is_key);
+        if self.shown && !auxiliary_owns_focus && !self.panel_is_key() {
+            self.dismiss(tx);
+        }
+    }
+
+    fn panel_is_key(&self) -> bool {
+        self.panel_window.as_ref().is_some_and(|window| {
+            window
+                .with_raw_handle(|handle| match handle.as_raw() {
+                    // SAFETY: Rune lends this live view only for this main-thread callback.
+                    RawWindowHandle::AppKit(appkit) => unsafe {
+                        dupin_mac::window::is_key_window(appkit.ns_view)
+                    },
+                    _ => false,
+                })
+                .unwrap_or(false)
+        })
     }
 
     pub fn preview_panel_resigned(&mut self, tx: &mut Tx) {
@@ -2352,7 +2474,7 @@ impl Ui {
             .as_ref()
             .is_some_and(|preview| preview.finish_focus_transfer());
         if !keep {
-            self.dismiss(tx);
+            self.dismiss_if_unfocused(tx);
         }
     }
 
@@ -2890,15 +3012,32 @@ mod action_screen_tests {
     #[test]
     fn enter_uses_the_selected_action_without_running_external_effects() {
         let (mut session, mut screen) = fixture();
-        screen.selected = 2;
+        screen.selected = 1;
         let ActionKey::Run(key, action) = screen.key(&Key::Enter, false) else {
             panic!("expected action")
         };
         let effects = session.run_key_action(&key, &action);
         assert!(
             effects.iter().any(
-                |effect| matches!(effect, Effect::Run(Action::Copy(value)) if value == "/fixture/example")
+                |effect| matches!(effect, Effect::Run(Action::Reveal(path)) if path == std::path::Path::new("/fixture/example"))
             )
         );
+    }
+
+    #[test]
+    fn send_to_navigation_preserves_the_parent_selection() {
+        let (_, mut screen) = fixture();
+        screen.selected = screen.item.actions.len();
+        assert_eq!(screen.key(&Key::Enter, false), ActionKey::SendTo);
+        screen.stage = ActionStage::Receivers {
+            actions: crate::receivers::for_payload(&screen.item.payload, &crate::web::WebCatalog::default()),
+            selected: 0,
+        };
+        assert_eq!(screen.key(&Key::Enter, true), ActionKey::Stay);
+        screen.key(&Key::Down, false);
+        assert_eq!(screen.key(&Key::Enter, false), ActionKey::Receive(1));
+        assert_eq!(screen.key(&Key::Escape, false), ActionKey::Stay);
+        assert!(matches!(screen.stage, ActionStage::List));
+        assert_eq!(screen.key(&Key::Enter, false), ActionKey::SendTo);
     }
 }

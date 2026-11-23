@@ -98,6 +98,7 @@ impl Provider for SystemProvider {
                     action = action.confirm(prompt, title);
                 }
                 Some(Item {
+                    payload: Default::default(),
                     id: title.into(),
                     view: View::Text {
                         title: title.into(),
