@@ -12,14 +12,10 @@
 	"capabilities": [
 		{
 			"id": "system-sleep",
-			"title": "Sleep",
-			"description": "Allow Sleep Now when explicitly selected",
 			"kind": "system-sleep"
 		},
 		{
 			"id": "system-lock-screen",
-			"title": "Lock screen",
-			"description": "Allow Lock Screen Now when explicitly selected",
 			"kind": "system-lock-screen"
 		}
 	],

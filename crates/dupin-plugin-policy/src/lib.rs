@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-pub use dupin_plugin_protocol::manifest::Capability;
+pub use dupin_plugin_protocol::manifest::{Capability, Tier};
 
 #[cfg(test)]
 mod tests;
