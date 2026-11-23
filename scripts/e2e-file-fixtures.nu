@@ -31,13 +31,34 @@ export def prepare [out: path] {
         $'Dupin disposable fixture: ($root)/($name)' | save ($root | path join $name)
     }
     open --raw ($root | path join trash-me.dupine2e) | hash sha256 | save ($root | path join trash.sha256)
-    ^mdimport $root
+    let imported = ^mdimport $root | complete
+    if $imported.exit_code != 0 {
+        error make {msg: $'Fixture import failed: ($imported.stderr)'}
+    }
+    mut found = {exit_code: 0, stdout: '', stderr: ''}
     for _ in 1..30 {
-        let indexed = ^mdfind -onlyin $root 'kMDItemFSName == "*.dupine2e"' | lines
-        if ($indexed | all {|path| $path | path exists }) and ($indexed | length) == 2 { return }
+        $found = (^mdfind -onlyin $root 'kMDItemFSName == "*.dupine2e"' | complete)
+        let indexed = $found.stdout | lines
+        if $found.exit_code == 0 and ($indexed | all {|path| $path | path exists }) and ($indexed | length) == 2 { return }
         sleep 1sec
     }
-    error make {msg: 'Spotlight did not index both file-action fixtures'}
+    {
+        volume: (^mdutil -s $root | complete)
+        import: $imported
+        search: $found
+        name_search: (^mdfind -onlyin $root -name dupine2e | complete)
+        fixtures: ([open-me.dupine2e trash-me.dupine2e] | each {|name|
+            let file = $root | path join $name
+            {
+                path: $file
+                metadata: (^mdls -name kMDItemContentType -name kMDItemFSName $file | complete)
+                test_import: (^mdimport -t -d1 $file | complete)
+            }
+        })
+    } | to nuon --indent 2 | save ($out | path join spotlight-diagnosis.txt)
+    error make {
+        msg: 'Spotlight did not index both file-action fixtures; see spotlight-diagnosis.txt'
+    }
 }
 
 export def cleanup [out: path] {
