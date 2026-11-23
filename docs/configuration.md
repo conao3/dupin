@@ -19,6 +19,7 @@ display = "mouse" # "mouse", "main", or "active"
 snippet_keywords = ["snip"] # type any keyword, then Space, to search snippets
 snippet_paste = false # whether Enter on a snippet also pastes it into the front app
 window_management = false # show commands to move and resize windows in normal search
+calculator = true # show calculations and unit conversions in app search
 position = "center" # "center" puts the field at the middle of the display; "top" near its top
 input_source = "ascii" # "ascii", "keep", or an input source identifier such as "com.apple.keylayout.ABC"
 auto_update = true # whether a release build checks for and installs its channel's updates by itself
@@ -38,6 +39,8 @@ Aliases must be non-empty, have no leading or trailing whitespace and leave othe
 Turn on **Calendar search** in Settings → Search, or set `enabled = true` in `[calendar]`. This reserves the `cal` keyword. Dupin asks for Calendar access when you first use the command in the packaged app. Turning the setting off removes the command immediately.
 
 Choose **Relaunch** in Settings → General to restart Dupin. File edits reload automatically. Relaunch remains available when the configuration is read-only, including Nix-managed files. If an update is already staged, relaunch installs it first.
+
+Set `calculator = false` or turn off **Calculator** in Settings → Search to hide calculator results. Changes apply immediately.
 
 In Settings → General → Display, choose Mouse pointer (`"mouse"`, the default), Main display (`"main"`), or Focused window (`"active"`). Focused window uses any existing Accessibility grant. If access or the focused window is unavailable, the panel opens on the main display with a notice. When access is missing, choose **Set Up Accessibility** in the notice to request access or open Accessibility Settings.
 

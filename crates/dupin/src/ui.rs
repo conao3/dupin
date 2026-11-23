@@ -679,17 +679,11 @@ impl Ui {
         };
         let sources = registration.registry.ids();
         self.snapshots.update(move |s, _| s.set_sources(sources));
-        let recent_changed = config.show_recent
-            != self
-                .session
-                .provider_spec(&crate::commands::recent_id())
-                .is_some();
         let effects = self
             .session
             .set_commands(registration.registry)
             .expect("built-in command registration is valid");
         self.registration_notice = registration.notice;
-        let window_management_changed = self.window_management_enabled != config.window_management;
         self.window_management_enabled = config.window_management;
         if !config.window_management {
             self.window_permission_required = false;
@@ -699,9 +693,8 @@ impl Ui {
         if !effects.is_empty() {
             self.apply(effects, tx);
         } else if self.session.command().result_limit != previous_limit
-            || ((web_changed || window_management_changed) && is_apps && !empty)
+            || (web_changed && is_apps && !empty)
             || (ranking_changed && self.session.command_id().as_str() == crate::commands::FILES)
-            || (recent_changed && is_apps && empty)
             || (clipboard_changed && self.session.command_id().as_str() == crate::commands::CLIPBOARD)
             || (snippets_changed && self.session.command_id().as_str() == crate::commands::SNIPPETS)
         {

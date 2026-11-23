@@ -1083,7 +1083,21 @@ fn search(s: &Prefs, k: &Kit) -> Vec<El> {
         .disabled(s.read_only)
         .on_toggle(move |s: &mut Prefs| s.set(|c| c.window_management = !enabled))
         .build(k);
+    let next_calculator = !s.config.calculator;
+    let calculator = Switch::new(s.config.calculator)
+        .label("Calculator")
+        .hide_label()
+        .disabled(s.read_only)
+        .on_toggle(move |s: &mut Prefs| s.set(|c| c.calculator = next_calculator))
+        .build(k);
     let mut rows = vec![
+        setting(
+            k,
+            &icons::CALCULATOR,
+            "Calculator",
+            Some("Show calculations and unit conversions in app search"),
+            calculator,
+        ),
         setting(
             k,
             &icons::PANEL,

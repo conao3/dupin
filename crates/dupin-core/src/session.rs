@@ -381,8 +381,13 @@ impl Session {
                 .as_ref()
                 .is_none_or(|destination| commands.contains(&destination.original.command))
         {
+            let previous = self.provider_ids();
             self.commands = commands;
-            return Ok(Vec::new());
+            return Ok(if self.provider_ids() == previous {
+                Vec::new()
+            } else {
+                self.refresh()
+            });
         }
         let mut effects = vec![Effect::ClearQuery];
         effects.extend(self.reset_to_default(Some(commands)));

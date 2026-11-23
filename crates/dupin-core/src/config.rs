@@ -24,6 +24,7 @@ pub struct Config {
     /// Keywords followed by Space that enter macOS Dictionary search.
     pub dictionary_keywords: Vec<String>,
     pub window_management: bool,
+    pub calculator: bool,
     /// Web search keywords and their URL templates. `{query}` is replaced when selected.
     pub web_searches: BTreeMap<String, WebSearch>,
     /// Web search keywords offered when no regular results match.
@@ -203,6 +204,7 @@ impl Default for Config {
             dictionary_keywords: vec!["define".into(), "d".into()],
             display: DisplaySelection::default(),
             window_management: false,
+            calculator: true,
             web_searches: BTreeMap::from([
                 (
                     "g".into(),

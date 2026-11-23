@@ -22,6 +22,7 @@ pub const SNIPPETS: &str = "snippets.search";
 pub const SCRIPTS: &str = "scripts.search";
 const BROWSE: &str = "files.browse";
 const SETTINGS: &str = "settings.search";
+const CALCULATOR: &str = "calculator.evaluate";
 const WEB_KEYWORDS: &str = "web.keywords";
 const WEB_FALLBACKS: &str = "web.fallbacks";
 const WINDOWS: &str = "windows.arrange";
@@ -92,7 +93,7 @@ fn id(value: &str) -> CommandId {
     CommandId::new(value).expect("built-in command IDs are valid")
 }
 
-pub fn recent_id() -> CommandId {
+fn recent_id() -> CommandId {
     id("recent.items")
 }
 
@@ -196,6 +197,11 @@ pub fn configured(config: &Config) -> Result<ConfiguredCommands, dupin_core::Com
         presentation("Search settings", None, None, None, false, 0.0),
     ))?;
     registry.register(CommandSpec::new(
+        id(CALCULATOR),
+        usize::from(config.calculator),
+        presentation("Calculate", None, None, None, false, 0.0),
+    ))?;
+    registry.register(CommandSpec::new(
         id(WEB_KEYWORDS),
         1,
         presentation("Web search", None, None, None, false, 0.0),
@@ -220,6 +226,9 @@ pub fn configured(config: &Config) -> Result<ConfiguredCommands, dupin_core::Com
         id(WEB_KEYWORDS),
         id(WEB_FALLBACKS),
     ];
+    if config.calculator {
+        default_providers.insert(0, id(CALCULATOR));
+    }
     if config.show_recent {
         let recent = recent_id();
         registry.register(
@@ -350,6 +359,10 @@ pub fn register(
             Arc::new(crate::scripts::provider::ScriptsProvider(scripts.clone())) as Arc<dyn Provider>,
         ),
         (
+            id(CALCULATOR),
+            Arc::new(crate::calculator::Calculator) as Arc<dyn Provider>,
+        ),
+        (
             id(SETTINGS),
             Arc::new(dupin_mac::SettingsProvider::default()) as Arc<dyn Provider>,
         ),
@@ -411,6 +424,77 @@ mod tests {
     use super::*;
 
     #[test]
+    fn calculator_precedes_apps_and_enter_copies_without_recording_usage() {
+        use dupin_core::{Action, Delivery, Effect, History, Intent, Item, Request, Session, View};
+
+        let registry = configured(&Config::default()).unwrap().registry;
+        let mut session = Session::new(History::default(), registry).unwrap();
+        let effects = session.set_query("12*3");
+        let generation = effects
+            .iter()
+            .find_map(|effect| match effect {
+                Effect::Search {
+                    command, generation, ..
+                } if command.as_str() == CALCULATOR => Some(*generation),
+                _ => None,
+            })
+            .unwrap();
+        let mut items = Vec::new();
+        crate::calculator::Calculator
+            .search(&Request::detached("12*3", 1), &mut |batch| items.extend(batch))
+            .unwrap();
+        session.deliver_from(
+            id(APPS),
+            Delivery::Batch {
+                generation,
+                items: vec![Item::path("/fixture.app".into(), "Fixture".into(), Vec::new())],
+            },
+        );
+        session.deliver_from(id(CALCULATOR), Delivery::Batch { generation, items });
+        assert_eq!(
+            session.selected_item().unwrap().view,
+            View::Pair {
+                source: "12*3".into(),
+                result: "36".into()
+            }
+        );
+        assert_eq!(session.items()[1].display_title(), "Fixture");
+        let activate = session.intent(Intent::Open).unwrap();
+        assert!(activate.contains(&Effect::Run(Action::Copy("36".into()))));
+        assert!(!activate.contains(&Effect::SaveHistory));
+    }
+
+    #[test]
+    fn disabling_calculator_refreshes_default_search_without_it() {
+        use dupin_core::{Delivery, Effect, History, Session};
+
+        let registry = configured(&Config::parse("file_limit = 20").unwrap())
+            .unwrap()
+            .registry;
+        let mut session = Session::new(History::default(), registry).unwrap();
+        let effects = session.set_query("12*3");
+        let generation = effects
+            .iter()
+            .find_map(|effect| match effect {
+                Effect::Search {
+                    command, generation, ..
+                } if command.as_str() == CALCULATOR => Some(*generation),
+                _ => None,
+            })
+            .unwrap();
+
+        let disabled = Config::parse("calculator = false").unwrap();
+        let effects = session
+            .set_commands(configured(&disabled).unwrap().registry)
+            .unwrap();
+        assert!(!effects.is_empty());
+        assert!(effects.iter().all(
+            |effect| !matches!(effect, Effect::Search { command, .. } if command.as_str() == CALCULATOR)
+        ));
+        assert!(!session.deliver_from(id(CALCULATOR), Delivery::Done { generation }));
+    }
+
+    #[test]
     fn window_commands_follow_the_live_opt_in_and_run_through_the_session() {
         use dupin_core::window_management::Layout;
         use dupin_core::{Action, Delivery, Effect, History, Intent, Request, Session};
@@ -466,10 +550,10 @@ mod tests {
         ));
 
         config.show_recent = false;
-        session
+        let effects = session
             .set_commands(configured(&config).unwrap().registry)
             .unwrap();
-        assert_eq!(session.refresh(), [Effect::CancelSearch]);
+        assert_eq!(effects, [Effect::CancelSearch]);
         assert!(session.items().is_empty());
     }
 

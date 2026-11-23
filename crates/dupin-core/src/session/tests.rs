@@ -498,8 +498,7 @@ fn removing_the_only_empty_query_provider_cancels_and_rejects_its_delivery() {
     let generation = searched(&s.refresh()).1;
     let (replacement, _, _) = empty_provider_registry(false);
 
-    s.set_commands(replacement).unwrap();
-    assert_eq!(s.refresh(), [Effect::CancelSearch]);
+    assert_eq!(s.set_commands(replacement).unwrap(), [Effect::CancelSearch]);
     assert_eq!(s.results(), Results::Idle);
     assert!(!s.deliver_from(
         empty,

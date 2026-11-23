@@ -87,6 +87,13 @@ Dupin requests Accessibility access on the first command that needs it.
 If access is missing, choose **Open Accessibility Settings** in the panel,
 allow Dupin and run the command again.
 
+## Calculator
+
+Type a calculation in app search, such as `12*3`, `2^10`, `(1+2)/3` or
+`15% of 200`. Convert units with `5 km to mi`, `100 f to c` or `1 GiB in MB`.
+The answer appears above apps. Press Enter to copy the displayed number without
+units or the approximation label. Turn Calculator off in **Settings → Search**.
+
 ## Snapshots
 
 Press ⌘⇧S in the launcher to save a finished calculation, search or extension view.
