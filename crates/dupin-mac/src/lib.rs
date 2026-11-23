@@ -23,6 +23,7 @@ mod recent;
 pub mod selection;
 mod settings_search;
 pub mod spotlight;
+pub mod system_commands;
 pub mod system_hotkey;
 pub mod watcher;
 pub mod window;

@@ -26,6 +26,7 @@ pub enum Action {
     Duplicate(PathBuf),
     /// Zip beside the original under a name that is not taken.
     Compress(PathBuf),
+    System(SystemCommand),
     /// Show in the file manager, selected.
     Reveal(PathBuf),
     /// Open a URL with its registered handler.
@@ -56,6 +57,18 @@ pub enum Action {
 pub enum Transfer {
     Move,
     Copy,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SystemCommand {
+    Sleep,
+    LockScreen,
+    SleepDisplays,
+    Restart,
+    ShutDown,
+    LogOut,
+    EmptyTrash,
+    ToggleDarkMode,
 }
 
 /// Whether an item action completes the pick or leaves the current search available.

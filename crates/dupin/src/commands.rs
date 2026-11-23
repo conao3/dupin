@@ -9,7 +9,7 @@ use dupin_core::{
 };
 use dupin_mac::{
     AppsProvider, CalendarProvider, DictionaryProvider, FolderProvider, RecentProvider, SpotlightProvider,
-    Target,
+    Target, system_commands,
 };
 
 pub const APPS: &str = "apps.search";
@@ -21,6 +21,7 @@ pub const CLIPBOARD: &str = "clipboard.history";
 pub const SNIPPETS: &str = "snippets.search";
 pub const SCRIPTS: &str = "scripts.search";
 const BROWSE: &str = "files.browse";
+pub(crate) const SYSTEM: &str = "system.commands";
 const SETTINGS: &str = "settings.search";
 const CALCULATOR: &str = "calculator.evaluate";
 const WEB_KEYWORDS: &str = "web.keywords";
@@ -36,6 +37,7 @@ pub struct Registration {
     pub snippets: Arc<RwLock<SnippetCatalog>>,
     pub scripts: Arc<RwLock<crate::scripts::catalog::Catalog>>,
     pub file_demotions: Arc<RwLock<Vec<String>>>,
+    pub system_provider: Arc<system_commands::SystemProvider>,
 }
 
 pub struct ConfiguredCommands {
@@ -192,6 +194,11 @@ pub fn configured(config: &Config) -> Result<ConfiguredCommands, dupin_core::Com
     registry.set_destination_search(files_id)?;
 
     registry.register(CommandSpec::new(
+        id(SYSTEM),
+        system_commands::COMMANDS.len(),
+        presentation("Search system commands", None, None, None, false, 0.0),
+    ))?;
+    registry.register(CommandSpec::new(
         id(SETTINGS),
         10,
         presentation("Search settings", None, None, None, false, 0.0),
@@ -221,6 +228,7 @@ pub fn configured(config: &Config) -> Result<ConfiguredCommands, dupin_core::Com
     ))?;
     let mut default_providers = vec![
         apps_id,
+        id(SYSTEM),
         id(SCRIPTS),
         id(SETTINGS),
         id(WEB_KEYWORDS),
@@ -348,8 +356,10 @@ pub fn register(
     let dictionary_id = id(DICTIONARY);
     let file_demotions = Arc::new(RwLock::new(config.file_demotions.clone()));
     let scripts = Arc::new(RwLock::new(crate::scripts::catalog::Catalog::default()));
+    let system_provider = Arc::new(system_commands::SystemProvider::new(config.system_automation));
     let providers: HashMap<_, Arc<dyn Provider>> = [
         (apps_id, apps.clone() as Arc<dyn Provider>),
+        (id(SYSTEM), system_provider.clone() as Arc<dyn Provider>),
         (
             recent_id(),
             Arc::new(RecentProvider::new(apps, session.recent_history())) as Arc<dyn Provider>,
@@ -414,12 +424,83 @@ pub fn register(
         snippets,
         file_demotions,
         scripts,
+        system_provider,
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn normal_search_dispatches_each_command_through_its_expected_activation() {
+        use dupin_core::{Action, Delivery, Effect, History, Intent, Request, Session, SystemCommand};
+
+        let config = Config {
+            system_automation: true,
+            ..Config::default()
+        };
+        let provider = system_commands::SystemProvider::new(config.system_automation);
+        for (command, title, requires_confirmation) in [
+            (SystemCommand::Sleep, "Sleep", false),
+            (SystemCommand::LockScreen, "Lock Screen", false),
+            (SystemCommand::SleepDisplays, "Sleep Displays", false),
+            (SystemCommand::Restart, "Restart", true),
+            (SystemCommand::ShutDown, "Shut Down", true),
+            (SystemCommand::LogOut, "Log Out", true),
+            (SystemCommand::EmptyTrash, "Empty Trash", true),
+            (SystemCommand::ToggleDarkMode, "Toggle Dark Mode", false),
+        ] {
+            let configured = crate::commands::configured(&config).unwrap();
+            let origin = CommandId::new(crate::commands::SYSTEM).unwrap();
+            let mut session = Session::new(History::default(), configured.registry).unwrap();
+            let generation = session
+                .set_query(title)
+                .into_iter()
+                .find_map(|effect| match effect {
+                    Effect::Search {
+                        command, generation, ..
+                    } if command == origin => Some(generation),
+                    _ => None,
+                })
+                .unwrap();
+            provider
+                .search(
+                    &Request::detached(title, system_commands::COMMANDS.len()),
+                    &mut |items| {
+                        session.deliver_from(origin.clone(), Delivery::Batch { generation, items });
+                    },
+                )
+                .unwrap();
+            assert_eq!(session.selected_item().unwrap().display_title(), title);
+            let key = session.result_key(0);
+            let opened = session.intent(Intent::Open).unwrap();
+            let effects = if requires_confirmation {
+                assert_eq!(
+                    opened,
+                    [Effect::ShowActions {
+                        id: key.clone(),
+                        generation,
+                        confirmation: Some("run".into()),
+                    }]
+                );
+                assert!(session.run_key_action(&key, "run").is_empty());
+                session.run_confirmed_key_action(&key, "run")
+            } else {
+                assert!(session.run_confirmed_key_action(&key, "run").is_empty());
+                opened
+            };
+            let [Effect::Run(Action::System(picked)), ..] = effects.as_slice() else {
+                panic!("expected a system command, got {effects:?}");
+            };
+            system_commands::execute(*picked, true, |picked| {
+                assert_eq!(picked, command);
+                Ok(())
+            })
+            .unwrap();
+            assert!(!effects.contains(&Effect::SaveHistory));
+        }
+    }
 
     #[test]
     fn calculator_precedes_apps_and_enter_copies_without_recording_usage() {

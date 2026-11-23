@@ -45,6 +45,7 @@ pub struct Config {
     /// Whether a signed release build installs its channel's updates by itself. Builds
     /// without an update feed (Nix, `cargo run`) never update.
     pub auto_update: bool,
+    pub system_automation: bool,
     /// The shader that animates behind the query field.
     pub backdrop: Backdrop,
     pub theme: Theme,
@@ -244,6 +245,7 @@ impl Default for Config {
             position: Position::Center,
             input_source: InputSource::Ascii,
             auto_update: true,
+            system_automation: false,
             backdrop: Backdrop::Off,
             theme: Theme::default(),
             calendar: Calendar::default(),

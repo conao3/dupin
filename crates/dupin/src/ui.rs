@@ -154,6 +154,7 @@ pub enum ActionStage {
     Confirm {
         action_id: String,
         selected: usize,
+        from_list: bool,
     },
 }
 
@@ -201,17 +202,24 @@ impl ActionScreen {
         }
     }
 
+    fn back(&mut self) -> ActionKey {
+        if matches!(
+            self.stage,
+            ActionStage::List | ActionStage::Confirm { from_list: false, .. }
+        ) {
+            return ActionKey::Back;
+        }
+        self.stage = ActionStage::List;
+        crate::trace::action_screen("list");
+        ActionKey::Stay
+    }
+
     fn key(&mut self, key: &Key, repeat: bool) -> ActionKey {
         if matches!(key, Key::Enter) && repeat {
             return ActionKey::Stay;
         }
         if matches!(key, Key::Left | Key::Escape) {
-            if matches!(self.stage, ActionStage::List) {
-                return ActionKey::Back;
-            }
-            self.stage = ActionStage::List;
-            crate::trace::action_screen("list");
-            return ActionKey::Stay;
+            return self.back();
         }
         match &mut self.stage {
             ActionStage::Confirm { selected, .. } => {
@@ -219,10 +227,7 @@ impl ActionScreen {
                     Key::Up => *selected = 0,
                     Key::Down => *selected = 1,
                     Key::Enter if *selected == 1 => return ActionKey::Confirm,
-                    Key::Enter => {
-                        self.stage = ActionStage::List;
-                        crate::trace::action_screen("list");
-                    }
+                    Key::Enter => return self.back(),
                     _ => {}
                 }
                 return ActionKey::Stay;
@@ -342,6 +347,7 @@ pub struct Ui {
     /// Pasting has asked macOS for access once since launch; later attempts explain instead.
     paste_access_asked: bool,
     file_demotions: Arc<RwLock<Vec<String>>>,
+    system_provider: Arc<dupin_mac::system_commands::SystemProvider>,
     deadlines: HashMap<CommandId, (u64, f64)>,
     _apps_watcher: Option<AppsWatcher>,
     clipboard: crate::clipboard::Clipboard,
@@ -362,7 +368,8 @@ pub struct Ui {
     window_action_after_close: Option<(WindowLayout, Option<i32>, Busy)>,
     window_action_running: bool,
     pub window_permission_required: bool,
-    /// Actions handed to Launch Services that haven't returned yet; a relaunch waits for them.
+    system_runner: dupin_mac::system_commands::Runner,
+    /// Native actions that haven't returned yet; a relaunch waits for them.
     running: Arc<AtomicUsize>,
     file_transfers: dupin_mac::file_ops::FileTransfers,
     updater: crate::update::Updater,
@@ -634,6 +641,7 @@ impl Ui {
             notice_after_close: None,
             paste_access_asked: false,
             file_demotions: registration.file_demotions,
+            system_provider: registration.system_provider,
             deadlines: HashMap::new(),
             _apps_watcher: apps_watcher,
             clipboard,
@@ -652,6 +660,11 @@ impl Ui {
             window_action_after_close: None,
             window_action_running: false,
             window_permission_required: false,
+            system_runner: if cfg!(test) || rune::tooling::is_headless() {
+                |_| Err("System commands are unavailable in headless runs.".into())
+            } else {
+                dupin_mac::system_commands::run
+            },
             running,
             file_transfers: dupin_mac::file_ops::FileTransfers::default(),
             updater,
@@ -707,10 +720,14 @@ impl Ui {
         let currency_changed = self
             .currency
             .set_enabled(config.calculator && config.calculator_currency);
+        let automation_changed = self
+            .system_provider
+            .set_automation_enabled(config.system_automation);
         if !effects.is_empty() {
             self.apply(effects, tx);
         } else if self.session.command().result_limit != previous_limit
-            || ((web_changed || currency_changed) && is_apps && !empty)
+            || ((web_changed || currency_changed || automation_changed) && is_apps && !empty)
+            || (automation_changed && self.session.command_id().as_str() == crate::commands::SYSTEM)
             || (ranking_changed && self.session.command_id().as_str() == crate::commands::FILES)
             || (clipboard_changed && self.session.command_id().as_str() == crate::commands::CLIPBOARD)
             || (snippets_changed && self.session.command_id().as_str() == crate::commands::SNIPPETS)
@@ -1394,10 +1411,7 @@ impl Ui {
         }
         if let Some(screen) = &mut self.action_screen {
             match screen.key(&ev.key, tx.key_repeat()) {
-                ActionKey::Back => {
-                    self.action_screen = None;
-                    tx.focus("query", false);
-                }
+                ActionKey::Back => self.close_action_screen(tx),
                 ActionKey::Run(key, action) => self.pick_action(&key, &action, tx),
                 ActionKey::Confirm => self.confirm_action(tx),
                 ActionKey::Choice(index) => self.pick_application(index, tx),
@@ -1511,15 +1525,16 @@ impl Ui {
     }
 
     pub fn action_back(&mut self, tx: &mut Tx) {
-        if let Some(screen) = &mut self.action_screen {
-            if matches!(screen.stage, ActionStage::List) {
-                self.action_screen = None;
-                tx.focus("query", false);
-            } else {
-                screen.stage = ActionStage::List;
-                crate::trace::action_screen("list");
-            }
+        if let Some(screen) = &mut self.action_screen
+            && screen.back() == ActionKey::Back
+        {
+            self.close_action_screen(tx);
         }
+    }
+
+    fn close_action_screen(&mut self, tx: &mut Tx) {
+        self.action_screen = None;
+        tx.focus("query", false);
     }
 
     pub fn pick_action(&mut self, key: &str, action: &str, tx: &mut Tx) {
@@ -1567,6 +1582,7 @@ impl Ui {
             self.action_screen.as_mut().unwrap().stage = ActionStage::Confirm {
                 action_id: action.into(),
                 selected: 0,
+                from_list: true,
             };
             self.action_screen.as_mut().unwrap().selected = selected;
             crate::trace::action_screen("confirm");
@@ -1627,6 +1643,7 @@ impl Ui {
         let ActionStage::Confirm {
             action_id,
             selected: 1,
+            ..
         } = &screen.stage
         else {
             return;
@@ -1642,8 +1659,7 @@ impl Ui {
         {
             *index = selected.min(1);
             if selected == 0 {
-                screen.stage = ActionStage::List;
-                crate::trace::action_screen("list");
+                self.action_back(tx);
             } else {
                 self.confirm_action(tx);
             }
@@ -1862,7 +1878,7 @@ impl Ui {
     fn apply(&mut self, effects: Vec<Effect>, tx: &mut Tx) {
         for effect in effects {
             match effect {
-                Effect::ShowActions { id, generation: _ } => {
+                Effect::ShowActions { id, confirmation, .. } => {
                     let Some(item) = self
                         .session
                         .items()
@@ -1872,11 +1888,28 @@ impl Ui {
                     else {
                         continue;
                     };
+                    let (selected, stage) = if let Some(action_id) = confirmation {
+                        let Some(selected) = item.actions.iter().position(|action| action.id == action_id)
+                        else {
+                            continue;
+                        };
+                        crate::trace::action_screen("confirm");
+                        (
+                            selected,
+                            ActionStage::Confirm {
+                                action_id,
+                                selected: 0,
+                                from_list: false,
+                            },
+                        )
+                    } else {
+                        (0, ActionStage::List)
+                    };
                     self.action_screen = Some(ActionScreen {
                         key: id,
                         item: item.clone(),
-                        selected: 0,
-                        stage: ActionStage::List,
+                        selected,
+                        stage,
                     });
                 }
                 Effect::Search {
@@ -2041,6 +2074,13 @@ impl Ui {
                             self.window_action_after_close =
                                 Some((layout, self.frontmost_pid, Busy::new(self.running.clone())));
                         }
+                    }
+                    dupin_core::Action::System(command) => {
+                        let run = self.system_runner;
+                        let enabled = self.configuration.values.borrow().system_automation;
+                        self.run_native_action(move || {
+                            dupin_mac::system_commands::execute(command, enabled, run)
+                        });
                     }
                     dupin_core::Action::Preview(path) => {
                         let shown = self
@@ -2222,10 +2262,14 @@ impl Ui {
     }
 
     fn run_workspace_action(&self, action: dupin_mac::workspace::Action) {
+        self.run_native_action(move || dupin_mac::workspace::run(&action));
+    }
+
+    fn run_native_action(&self, run: impl FnOnce() -> Result<(), String> + Send + 'static) {
         let me = self.me.clone();
         let busy = Busy::new(self.running.clone());
         std::thread::spawn(move || {
-            if let Err(error) = dupin_mac::workspace::run(&action) {
+            if let Err(error) = run() {
                 me.update(move |ui, tx| ui.show_notice(error, tx));
             }
             drop(busy);
@@ -2685,12 +2729,14 @@ mod action_screen_tests {
                 screen.stage = ActionStage::Confirm {
                     action_id: "trash".into(),
                     selected: 0,
+                    from_list: true,
                 };
             }
         }
         screen.stage = ActionStage::Confirm {
             action_id: "trash".into(),
             selected: 0,
+            from_list: true,
         };
         screen.key(&Key::Down, false);
         assert_eq!(screen.key(&Key::Enter, true), ActionKey::Stay);
@@ -2705,6 +2751,7 @@ mod action_screen_tests {
             ActionStage::Confirm {
                 action_id: "trash".into(),
                 selected: 0,
+                from_list: true,
             },
             ActionStage::Applications {
                 parent: "choose".into(),
@@ -2807,7 +2854,12 @@ mod action_screen_tests {
             session.selected(),
             session.result_key(0),
         );
-        for key in [Key::Left, Key::Escape] {
+        for key in [Key::Left, Key::Escape, Key::Enter] {
+            screen.stage = ActionStage::Confirm {
+                action_id: "restart".into(),
+                selected: 0,
+                from_list: false,
+            };
             assert_eq!(screen.key(&key, false), ActionKey::Back);
             assert_eq!(
                 (

@@ -24,6 +24,7 @@ calculator_currency = false # allow downloading exchange rates when Calculator i
 position = "center" # "center" puts the field at the middle of the display; "top" near its top
 input_source = "ascii" # "ascii", "keep", or an input source identifier such as "com.apple.keylayout.ABC"
 auto_update = true # whether a release build checks for and installs its channel's updates by itself
+system_automation = false # show Restart, Shut Down, Log Out and Empty Trash, which send Apple events
 backdrop = "off" # "off", "flow", or the path to a WGSL shader
 ```
 

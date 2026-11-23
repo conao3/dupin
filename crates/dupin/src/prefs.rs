@@ -925,6 +925,13 @@ fn general(s: &Prefs, k: &Kit) -> Vec<El> {
     let relaunch = value_button(k, "relaunch", "Relaunch", &icons::REFRESH).on_press(|s: &mut Prefs| {
         s.panel.update(|ui, tx| ui.relaunch(tx));
     });
+    let automation_enabled = s.config.system_automation;
+    let automation = Switch::new(automation_enabled)
+        .label("System Command Automation")
+        .hide_label()
+        .disabled(s.read_only)
+        .on_toggle(move |s: &mut Prefs| s.set(|c| c.system_automation = !automation_enabled))
+        .build(k);
     vec![
         hotkey_setting(s, k),
         setting(
@@ -966,6 +973,13 @@ fn general(s: &Prefs, k: &Kit) -> Vec<El> {
             input_source,
         ),
         login_setting(s.login.as_ref(), k),
+        setting(
+            k,
+            &rune_theme_opencode::icons::SHIELD,
+            "System Command Automation",
+            Some("Show system commands that may ask for macOS Automation when confirmed"),
+            automation,
+        ),
         setting(
             k,
             &icons::REFRESH,

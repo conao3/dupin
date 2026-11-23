@@ -619,12 +619,14 @@ fn action_list(s: &Ui, t: &ResolvedTheme, accent: Color) -> El {
             }
             return list;
         }
-        ActionStage::Confirm { action_id, selected } => {
+        ActionStage::Confirm {
+            action_id, selected, ..
+        } => {
             let action = screen.item.item_action(action_id).unwrap();
             let confirmation = action.confirmation().unwrap();
             let path = match screen.item.action(action_id) {
-                Some(dupin_core::Action::Trash(path)) => path.to_string_lossy(),
-                _ => "".into(),
+                Some(dupin_core::Action::Trash(path)) => Some(path.to_string_lossy()),
+                _ => None,
             };
             return col()
                 .key("confirmation")
@@ -640,8 +642,8 @@ fn action_list(s: &Ui, t: &ResolvedTheme, accent: Color) -> El {
                                 .color(t.text)
                                 .wrap(),
                         )
-                        .children((!path.is_empty()).then(|| {
-                            text(path.as_ref())
+                        .children(path.as_deref().map(|path| {
+                            text(path)
                                 .font(t.font(type_::LABEL))
                                 .color(t.text_secondary)
                                 .wrap()

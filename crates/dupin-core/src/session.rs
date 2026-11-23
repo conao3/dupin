@@ -51,6 +51,7 @@ pub enum Effect {
     ShowActions {
         id: String,
         generation: u64,
+        confirmation: Option<String>,
     },
     /// Hide the panel. The session has already reset itself for the next show.
     Hide,
@@ -613,7 +614,7 @@ impl Session {
         })
     }
 
-    fn actions(&mut self) -> Vec<Effect> {
+    fn actions(&mut self, confirmation: Option<String>) -> Vec<Effect> {
         let effects = self
             .actionable_items()
             .get(self.search.selected)
@@ -622,6 +623,7 @@ impl Session {
                 vec![Effect::ShowActions {
                     id: self.result_key(self.search.selected),
                     generation: self.search.generation,
+                    confirmation,
                 }]
             })
             .unwrap_or_default();
@@ -790,7 +792,7 @@ impl Session {
         }
         let empty = self.search.query.is_empty();
         Some(match intent {
-            Intent::Actions => self.actions(),
+            Intent::Actions => self.actions(None),
             Intent::Complete => {
                 let item = self.actionable_items().get(self.search.selected)?;
                 if let Some(completion) = item.completion.clone() {
@@ -842,7 +844,7 @@ impl Session {
                 };
                 let Some(id) = id else {
                     return Some(if intent == Intent::Open {
-                        self.actions()
+                        self.actions(None)
                     } else {
                         Vec::new()
                     });
@@ -850,6 +852,9 @@ impl Session {
                 let Some(action) = item.item_action(id).cloned() else {
                     return Some(Vec::new());
                 };
+                if action.confirmation().is_some() {
+                    return Some(self.actions(Some(action.id)));
+                }
                 let item = item.clone();
                 self.activate(&item, action)
             }
