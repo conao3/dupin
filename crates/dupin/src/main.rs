@@ -3,10 +3,12 @@
 
 mod backdrop;
 mod calculator;
+mod catalog_watch;
 mod cli;
 mod clipboard;
 mod commands;
 mod control;
+mod extensions;
 mod hotkey;
 mod http;
 mod icons;

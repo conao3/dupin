@@ -48,6 +48,9 @@ pub struct Config {
     pub system_automation: bool,
     /// The shader that animates behind the query field.
     pub backdrop: Backdrop,
+    /// Load Wasm extensions from the `extensions` folder beside config.toml. Off by default
+    /// because they are third-party code.
+    pub extensions: bool,
     pub theme: Theme,
     pub calendar: Calendar,
     pub clipboard: Clipboard,
@@ -247,6 +250,7 @@ impl Default for Config {
             auto_update: true,
             system_automation: false,
             backdrop: Backdrop::Off,
+            extensions: false,
             theme: Theme::default(),
             calendar: Calendar::default(),
             clipboard: Clipboard::default(),

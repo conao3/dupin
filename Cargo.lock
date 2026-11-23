@@ -764,6 +764,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "toml",
+ "wat",
  "wgpu",
 ]
 

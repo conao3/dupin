@@ -20,6 +20,7 @@ pub struct PathWatcher {
 #[derive(Clone, Copy)]
 enum Scope {
     Recursive,
+    Tree,
     Directory,
     Entries,
 }
@@ -33,7 +34,23 @@ impl PathWatcher {
         extra_paths: impl Fn(&[PathBuf]) -> Vec<PathBuf> + Send + 'static,
         changed: impl Fn() + Send + Sync + 'static,
     ) -> Result<Self, &'static str> {
-        Self::start_with_scope(roots, Scope::Recursive, extra_paths, move |_| changed())
+        let roots = roots.into_iter().map(|path| (path, Scope::Recursive)).collect();
+        Self::start_with_scope(roots, extra_paths, move |_| changed())
+    }
+
+    /// Watches shallow directory entries and recursive trees in one stream. The callback
+    /// receives `true` when a watched root changes identity.
+    pub fn start_scoped(
+        shallow: Vec<PathBuf>,
+        recursive: Vec<PathBuf>,
+        changed: impl Fn(bool) + Send + Sync + 'static,
+    ) -> Result<Self, &'static str> {
+        let roots = shallow
+            .into_iter()
+            .map(|path| (path, Scope::Directory))
+            .chain(recursive.into_iter().map(|path| (path, Scope::Tree)))
+            .collect();
+        Self::start_with_scope(roots, |_| Vec::new(), changed)
     }
 
     /// Watches direct entries, including in-place edits to their files.
@@ -41,9 +58,9 @@ impl PathWatcher {
         roots: Vec<PathBuf>,
         changed: impl Fn(bool) + Send + Sync + 'static,
     ) -> Result<Self, &'static str> {
+        let roots = roots.into_iter().map(|path| (path, Scope::Entries)).collect();
         Self::start_with_scope(
             roots,
-            Scope::Entries,
             |roots| {
                 roots
                     .iter()
@@ -65,16 +82,16 @@ impl PathWatcher {
         file: PathBuf,
         changed: impl Fn(bool) + Send + Sync + 'static,
     ) -> Result<Self, &'static str> {
-        Self::start_with_scope(roots, Scope::Directory, move |_| vec![file.clone()], changed)
+        let roots = roots.into_iter().map(|path| (path, Scope::Directory)).collect();
+        Self::start_with_scope(roots, move |_| vec![file.clone()], changed)
     }
 
     fn start_with_scope(
-        roots: Vec<PathBuf>,
-        scope: Scope,
+        roots: Vec<(PathBuf, Scope)>,
         extra_paths: impl Fn(&[PathBuf]) -> Vec<PathBuf> + Send + 'static,
         changed: impl Fn(bool) + Send + Sync + 'static,
     ) -> Result<Self, &'static str> {
-        let watched_roots = roots.clone();
+        let watched_roots: Vec<_> = roots.iter().map(|(path, _)| path.clone()).collect();
         let snapshot = move || Snapshot::read(&watched_roots, extra_paths(&watched_roots));
         let initial = snapshot();
         let (events, received) = mpsc::channel();
@@ -82,7 +99,7 @@ impl PathWatcher {
             .name("dupin-path-watch-debounce".into())
             .spawn(move || debounce_events(received, snapshot, initial, changed))
             .map_err(|_| "could not spawn path watcher debounce")?;
-        match watch_roots(roots, scope, events) {
+        match watch_roots(roots, events) {
             Ok(mut watcher) => {
                 watcher.debounce = Some(debounce);
                 Ok(watcher)
@@ -213,8 +230,7 @@ struct FSEventStreamContext {
 
 struct WatchContext {
     events: mpsc::Sender<bool>,
-    roots: Vec<PathBuf>,
-    scope: Scope,
+    roots: Vec<(PathBuf, Scope)>,
 }
 
 type FSEventCallback = unsafe extern "C" fn(
@@ -258,25 +274,37 @@ unsafe extern "C" {
 }
 
 fn watch_roots(
-    roots: Vec<PathBuf>,
-    scope: Scope,
+    roots: Vec<(PathBuf, Scope)>,
     events: mpsc::Sender<bool>,
 ) -> Result<PathWatcher, &'static str> {
     use objc2::rc::Retained;
     use objc2_foundation::{NSArray, NSString};
 
-    let roots: Vec<_> = roots.iter().map(|root| canonical_root(root)).collect();
-    let watched: Vec<_> = roots
+    let roots: Vec<_> = roots
+        .into_iter()
+        .map(|(root, scope)| (canonical_root(&root), scope))
+        .collect();
+    let flags = roots.iter().fold(USE_CF_TYPES, |flags, (_, scope)| {
+        flags
+            | match scope {
+                Scope::Recursive => 0,
+                Scope::Directory | Scope::Tree => WATCH_ROOT,
+                Scope::Entries => WATCH_ROOT | FILE_EVENTS,
+            }
+    });
+    let mut watched: Vec<_> = roots
         .iter()
-        .map(|root| {
+        .map(|(root, _)| {
             let mut path = root.as_path();
             while !path.exists() {
                 let Some(parent) = path.parent() else { break };
                 path = parent;
             }
-            path.to_owned()
+            path
         })
         .collect();
+    watched.sort_unstable();
+    watched.dedup();
     let paths: Vec<Retained<NSString>> = watched
         .iter()
         .filter_map(|path| path.to_str().map(NSString::from_str))
@@ -285,8 +313,7 @@ fn watch_roots(
         return Err("no paths can be watched");
     }
     let paths = NSArray::from_retained_slice(&paths);
-    let context_info =
-        Box::into_raw(Box::new(WatchContext { events, roots, scope })).cast::<std::ffi::c_void>();
+    let context_info = Box::into_raw(Box::new(WatchContext { events, roots })).cast::<std::ffi::c_void>();
     let mut context = FSEventStreamContext {
         version: 0,
         info: context_info,
@@ -304,12 +331,7 @@ fn watch_roots(
             Retained::as_ptr(&paths).cast(),
             u64::MAX,
             0.5,
-            USE_CF_TYPES
-                | match scope {
-                    Scope::Recursive => 0,
-                    Scope::Directory => WATCH_ROOT,
-                    Scope::Entries => WATCH_ROOT | FILE_EVENTS,
-                },
+            flags,
         )
     };
     if stream.is_null() {
@@ -367,7 +389,7 @@ unsafe extern "C" fn paths_changed(
                     context
                         .roots
                         .iter()
-                        .any(|root| matches_event_path(path, root, context.scope))
+                        .any(|(root, scope)| matches_event_path(path, root, *scope))
                 })
         })
     {
@@ -378,7 +400,7 @@ unsafe extern "C" fn paths_changed(
 fn matches_event_path(path: &Path, root: &Path, scope: Scope) -> bool {
     root.starts_with(path)
         || match scope {
-            Scope::Recursive => path.starts_with(root),
+            Scope::Recursive | Scope::Tree => path.starts_with(root),
             Scope::Directory => false,
             Scope::Entries => path.parent() == Some(root),
         }

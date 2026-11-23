@@ -8,15 +8,12 @@ publish.workspace = true
 homepage.workspace = true
 license.workspace = true
 
-[features]
-extension-tools = ["dep:dupin-plugin-runtime"]
-
 [dependencies]
 fend-core = "1.5.9"
 pico-args = "0.5"
 roxmltree = "0.21.2"
 dupin-plugin-protocol = { workspace = true }
-dupin-plugin-runtime = { path = "../dupin-plugin-runtime", optional = true }
+dupin-plugin-runtime = { path = "../dupin-plugin-runtime" }
 dupin-core = { workspace = true }
 dupin-mac = { workspace = true }
 libc = { workspace = true }
@@ -49,6 +46,7 @@ objc2-metal = { workspace = true, features = [
 
 [dev-dependencies]
 tempfile = "3"
+wat = "1"
 
 [lints]
 workspace = true
