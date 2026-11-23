@@ -8,13 +8,18 @@ use crate::file_ops::file_name_of;
 /// A file or folder result with every file action, as Spotlight results and renamed entries
 /// show it.
 pub fn item(path: PathBuf, title: String, matched: Vec<usize>) -> Item {
+    let folder = path.is_dir() && !crate::folder::is_package(&path);
+    item_with_folder(path, title, matched, folder)
+}
+
+pub(crate) fn item_with_folder(path: PathBuf, title: String, matched: Vec<usize>, folder: bool) -> Item {
     let mut item = Item::path(path, title, matched);
     crate::quick_look::add_action(&mut item);
-    add(&mut item);
+    add(&mut item, folder);
     item
 }
 
-fn add(item: &mut Item) {
+fn add(item: &mut Item, folder: bool) {
     let Some(Action::Open(path)) = item.action("open") else {
         return;
     };
@@ -30,6 +35,12 @@ fn add(item: &mut Item) {
         index,
         ItemAction::new("open-with", "Open with…", Action::ChooseApplication(path.clone())),
     );
+    if folder {
+        item.actions.insert(
+            index,
+            ItemAction::new("browse", "Browse", Action::Browse(path.clone())),
+        );
+    }
     if let Some(name) = path.file_name() {
         item.actions.push(ItemAction::new(
             "copy-name",
@@ -73,6 +84,14 @@ mod tests {
     use std::os::unix::ffi::OsStrExt;
 
     use super::*;
+
+    #[test]
+    fn folders_can_be_browsed() {
+        let path = PathBuf::from("/fixture/folder");
+        let item = item_with_folder(path.clone(), "folder".into(), vec![], true);
+        assert_eq!(item.actions[1].id, "browse");
+        assert_eq!(item.action("browse"), Some(&Action::Browse(path)));
+    }
 
     #[test]
     fn files_offer_ordered_choices_and_confirmed_trash() {
@@ -125,7 +144,7 @@ mod tests {
     fn non_path_results_have_no_file_actions() {
         let mut item = Item::path("/fixture".into(), "Fixture".into(), vec![]);
         item.actions.clear();
-        add(&mut item);
+        add(&mut item, true);
         assert!(item.actions.is_empty());
     }
 }

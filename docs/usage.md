@@ -26,9 +26,9 @@ Dupin needs macOS Accessibility access for this shortcut. If access is missing, 
 | `in` then Space                         | Search inside files with Spotlight, as Alfred's `in`  |
 | `define` or `d`, then Space             | Look up a word in macOS dictionaries                  |
 | `clip` then Space                       | Search the clipboard history, when it is on           |
-| ⌫ on an empty query                     | Leave file, content, dictionary or clipboard search   |
+| ⌫ on an empty query                     | Leave a folder or the current search mode             |
 | ↑ ↓                                     | Move the selection                                    |
-| Tab at the end of an unselected input   | Complete the selected search keyword                  |
+| Tab at the end of an unselected input   | Complete the selected keyword, or browse the folder   |
 | ↑ on an empty query, then ↑ ↓           | Recall searches in the current mode                   |
 | ↩                                       | Open the app or file                                  |
 | ⌘↩                                      | Reveal the file in Finder                             |
@@ -156,10 +156,12 @@ Valid qualifiers appear as inline chips without changing the query text. Backspa
 
 Both modes search the Spotlight index, so they find only what Spotlight has indexed.
 Right Arrow at the end of an unselected input, or Cmd+K, opens the selected
-result's action screen: Open, Open with…, Reveal in Finder, Quick Look, Copy path, Copy name, Rename…, Move to…, Copy to…, Duplicate, Compress and Move to Trash. Escape cancels the
+result's action screen: Open, Browse (folders), Open with…, Reveal in Finder, Quick Look, Copy path, Copy name, Rename…, Move to…, Copy to…, Duplicate, Compress and Move to Trash. Escape cancels the
 screen and returns to the exact search and selection. Use ↑ and ↓ to select an action, Enter to run it, and Left or Escape to return. Ctrl+K also opens actions. App results have the same screen with Open, Reveal, Quick Look and Copy path; file-only actions are omitted.
 
-Open with… lists the applications registered for the selected file or folder, with its default handler first. Choose an application to open the item. Left or Escape returns to Actions without changing the query. Move to Trash opens a confirmation with Cancel selected; choose Move to Trash explicitly to continue. Held Enter cannot confirm. After success the file leaves the current result list. Failures appear in the launcher. Folder browsing inside the picker is not supported.
+Open with… lists the applications registered for the selected file or folder, with its default handler first. Choose an application to open the item. Left or Escape returns to Actions without changing the query. Move to Trash opens a confirmation with Cancel selected; choose Move to Trash explicitly to continue. Held Enter cannot confirm. After success the file leaves the current result list. Failures appear in the launcher.
+
+Tab on a folder, or its Browse action, lists the folder in the panel, with its name in the chip: folders first, then by name. Type to filter the entries fuzzily; hidden entries appear when the filter starts with `.`. Tab enters a subfolder and ⌫ on an empty filter returns to the parent. Leaving the first folder restores the search, its query and selection. Listed entries have the same actions as search results.
 
 Rename… puts the item's name in the input, with the part before its extension selected, as Finder does. Type the new name and press Enter to rename it in the same folder, or Escape to return to the search unchanged. A name that is empty, `.` or `..`, contains `/` or `:`, or is longer than 255 UTF-16 code units (as APFS counts) shows why and stays editable; Enter does nothing until it is fixed. A held Enter that starts or confirms a rename does not repeat into the next step. Renaming never replaces an existing item: if the name is taken, the rename fails and says so. After success the result shows the new name in place.
 

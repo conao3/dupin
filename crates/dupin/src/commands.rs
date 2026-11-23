@@ -8,7 +8,8 @@ use dupin_core::{
     Session,
 };
 use dupin_mac::{
-    AppsProvider, CalendarProvider, DictionaryProvider, RecentProvider, SpotlightProvider, Target,
+    AppsProvider, CalendarProvider, DictionaryProvider, FolderProvider, RecentProvider, SpotlightProvider,
+    Target,
 };
 
 pub const APPS: &str = "apps.search";
@@ -19,6 +20,7 @@ pub const CALENDAR: &str = "calendar.events";
 pub const CLIPBOARD: &str = "clipboard.history";
 pub const SNIPPETS: &str = "snippets.search";
 pub const SCRIPTS: &str = "scripts.search";
+const BROWSE: &str = "files.browse";
 const SETTINGS: &str = "settings.search";
 const WEB_KEYWORDS: &str = "web.keywords";
 const WEB_FALLBACKS: &str = "web.fallbacks";
@@ -151,6 +153,13 @@ pub fn configured(config: &Config) -> Result<ConfiguredCommands, dupin_core::Com
             ),
         ),
         CommandSpec::new(
+            id(BROWSE),
+            file_limit,
+            presentation("Filter folder", None, None, Some("No matches"), false, 1.0),
+        )
+        .with_query_eligibility(QueryEligibility::Any)
+        .with_candidate_limit(MAX_FILE_CANDIDATES),
+        CommandSpec::new(
             dictionary_id.clone(),
             1,
             presentation(
@@ -224,6 +233,7 @@ pub fn configured(config: &Config) -> Result<ConfiguredCommands, dupin_core::Com
     }
     registry.set_default_providers(default_providers, Some(id(WEB_KEYWORDS)))?;
 
+    registry.set_browser(id(BROWSE))?;
     registry.add_keyword(&contents_id, "in")?;
     if config.clipboard.enabled {
         let clipboard = id(CLIPBOARD);
@@ -349,6 +359,7 @@ pub fn register(
             dictionary_id,
             Arc::new(DictionaryProvider::default()) as Arc<dyn Provider>,
         ),
+        (id(BROWSE), Arc::new(FolderProvider) as Arc<dyn Provider>),
         (
             id(SNIPPETS),
             Arc::new(SnippetProvider::new(snippets.clone())) as Arc<dyn Provider>,
@@ -428,6 +439,7 @@ mod tests {
                 command,
                 generation,
                 query,
+                ..
             },
         ] = effects.as_slice()
         else {
@@ -545,6 +557,7 @@ mod tests {
                         command,
                         generation,
                         query,
+                        ..
                     },
                 ] = effects.as_slice()
                 else {
@@ -664,6 +677,7 @@ mod tests {
                 command,
                 generation,
                 query,
+                ..
             },
         ] = effects.as_slice()
         else {

@@ -39,6 +39,7 @@ pub enum Effect {
         command: CommandId,
         generation: u64,
         query: String,
+        folder: Option<PathBuf>,
     },
     /// Stop whatever search is running; nothing should arrive for the current results.
     CancelSearch,
@@ -145,6 +146,16 @@ pub struct Session {
     queries: VecDeque<(CommandId, String)>,
     renaming: Option<Renaming>,
     destination: Option<Destination>,
+    browsing: Vec<Visit>,
+}
+
+#[derive(Debug)]
+struct Visit {
+    folder: Option<PathBuf>,
+    command: CommandId,
+    explicit: bool,
+    query: String,
+    selected: Option<(CommandId, String)>,
 }
 
 #[derive(Debug)]
@@ -153,6 +164,7 @@ struct SearchState {
     command: CommandId,
     explicit: bool,
     query: String,
+    folder: Option<PathBuf>,
     items: Vec<Item>,
     origins: Vec<CommandId>,
     providers: BTreeMap<CommandId, ProviderState>,
@@ -228,6 +240,7 @@ impl SearchState {
             command,
             explicit,
             query: String::new(),
+            folder: None,
             items: Vec::new(),
             origins: Vec::new(),
             providers: BTreeMap::new(),
@@ -355,6 +368,7 @@ impl Session {
             queries: VecDeque::new(),
             renaming: None,
             destination: None,
+            browsing: Vec::new(),
         })
     }
 
@@ -429,9 +443,14 @@ impl Session {
         {
             return Err("The source command is unavailable. Saved content remains readable.".into());
         }
+        if self.commands.browser() == Some(&command) {
+            return Err("A browsed folder can't be resumed. Saved content remains readable.".into());
+        }
         self.clear_results();
         self.renaming = None;
         self.destination = None;
+        self.browsing.clear();
+        self.search.folder = None;
         self.search.command = command;
         self.search.explicit = saved.explicit || self.search.command != *self.commands.default();
         self.search.query = saved.query.clone();
@@ -470,6 +489,11 @@ impl Session {
 
     pub fn query(&self) -> &str {
         &self.search.query
+    }
+
+    /// The folder being browsed, if any.
+    pub fn folder(&self) -> Option<&Path> {
+        self.search.folder.as_deref()
     }
 
     pub fn items(&self) -> &[Item] {
@@ -619,6 +643,7 @@ impl Session {
             return Vec::new();
         }
         match action.action {
+            Action::Browse(folder) => return self.browse(folder),
             Action::Rename(path) => return self.begin_rename(path),
             Action::ChooseDestination { path, transfer } => return self.begin_destination(path, transfer),
             _ => {}
@@ -762,21 +787,15 @@ impl Session {
         Some(match intent {
             Intent::Actions => self.actions(),
             Intent::Complete => {
-                let completion = self
-                    .actionable_items()
-                    .get(self.search.selected)?
-                    .completion
-                    .clone()?;
-                let mut effects = self.set_query(&completion);
-                if let Some(Effect::ReplaceQuery(text)) = effects
-                    .iter_mut()
-                    .find(|effect| matches!(effect, Effect::ReplaceQuery(_)))
-                {
-                    *text = self.search.query.clone();
+                let item = self.actionable_items().get(self.search.selected)?;
+                if let Some(completion) = item.completion.clone() {
+                    self.complete(&completion)
                 } else {
-                    effects.insert(0, Effect::ReplaceQuery(self.search.query.clone()));
+                    let Action::Browse(folder) = item.action("browse")? else {
+                        return None;
+                    };
+                    self.browse(folder.clone())
                 }
-                effects
             }
             Intent::Space if empty => self
                 .commands
@@ -790,6 +809,7 @@ impl Session {
                 effects.extend(self.switch(command, true));
                 effects
             }
+            Intent::Backspace if empty && self.folder().is_some() => self.leave_folder(),
             Intent::Backspace if empty && self.search.command != *self.commands.default() => {
                 self.switch(self.commands.default().clone(), false)
             }
@@ -830,6 +850,59 @@ impl Session {
             }
             Intent::Dismiss => self.dismiss(),
         })
+    }
+
+    fn complete(&mut self, completion: &str) -> Vec<Effect> {
+        let mut effects = self.set_query(completion);
+        if let Some(Effect::ReplaceQuery(text)) = effects
+            .iter_mut()
+            .find(|effect| matches!(effect, Effect::ReplaceQuery(_)))
+        {
+            *text = self.search.query.clone();
+        } else {
+            effects.insert(0, Effect::ReplaceQuery(self.search.query.clone()));
+        }
+        effects
+    }
+
+    fn browse(&mut self, folder: PathBuf) -> Vec<Effect> {
+        let Some(browser) = self.commands.browser().cloned() else {
+            return Vec::new();
+        };
+        let selected = self
+            .selected_item()
+            .map(|item| (self.search.origins[self.search.selected].clone(), item.id.clone()));
+        self.browsing.push(Visit {
+            folder: self.search.folder.replace(folder),
+            command: std::mem::replace(&mut self.search.command, browser),
+            explicit: std::mem::replace(&mut self.search.explicit, true),
+            query: std::mem::take(&mut self.search.query),
+            selected,
+        });
+        let mut effects = vec![Effect::ClearQuery];
+        effects.extend(self.replace_search());
+        effects
+    }
+
+    fn leave_folder(&mut self) -> Vec<Effect> {
+        let visit = self.browsing.pop().expect("leaving a browsed folder");
+        self.search.folder = visit.folder;
+        self.search.command = visit.command;
+        self.search.explicit = visit.explicit;
+        self.search.query = visit.query;
+        let mut effects = vec![Effect::ReplaceQuery(self.search.query.clone())];
+        effects.extend(self.replace_search());
+        self.search.selection_held = visit.selected.is_some();
+        self.search.refresh_selection = visit.selected;
+        effects
+    }
+
+    fn replace_search(&mut self) -> Vec<Effect> {
+        self.search.recalled = None;
+        self.search.deleting = false;
+        self.search.before_deletion = None;
+        self.clear_results();
+        self.search()
     }
 
     fn move_selection(&mut self, intent: Intent) -> Vec<Effect> {
@@ -1157,6 +1230,7 @@ impl Session {
             self.search = destination.original;
         }
         self.remember_query(false);
+        self.browsing.clear();
         if let Some(commands) = commands {
             self.commands = commands;
         }
@@ -1177,6 +1251,9 @@ impl Session {
     }
 
     fn remember_query(&mut self, activated: bool) {
+        if self.folder().is_some() {
+            return;
+        }
         if activated {
             self.search.deleting = false;
             self.search.before_deletion = None;
@@ -1302,6 +1379,7 @@ impl Session {
                 command,
                 generation: self.search.generation,
                 query: query.clone(),
+                folder: self.search.folder.clone(),
             })
             .collect()
     }

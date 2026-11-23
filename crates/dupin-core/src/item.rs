@@ -13,6 +13,8 @@ pub enum Action {
         application: PathBuf,
     },
     Trash(PathBuf),
+    /// List the folder's entries in the launcher.
+    Browse(PathBuf),
     /// Ask for a new name in the query field; the session then renames the entry.
     Rename(PathBuf),
     /// Search for a destination folder before transferring the entry.

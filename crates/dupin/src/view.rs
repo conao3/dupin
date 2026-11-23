@@ -735,12 +735,16 @@ fn header(s: &Ui, t: &ResolvedTheme, accent: Color) -> El {
         let name = picker.path().file_name().unwrap_or(picker.path().as_os_str());
         format!("{operation} · {}", name.to_string_lossy())
     });
+    let folder = s
+        .session
+        .folder()
+        .map(|folder| folder.file_name().unwrap_or(folder.as_os_str()).to_string_lossy());
     let chip = if let Some(chip) = destination_chip.as_deref() {
         Some(chip)
     } else if renaming {
         Some("Rename")
     } else {
-        presentation.chip.as_deref()
+        folder.as_deref().or(presentation.chip.as_deref())
     };
     bar = if let Some(chip) = chip {
         bar.child(
@@ -839,7 +843,7 @@ fn hint(s: &Ui) -> Option<&str> {
             .then_some("No matching folders");
     }
     let presentation = &s.session.command().presentation;
-    let empty = s.session.query().trim().is_empty();
+    let empty = s.session.query().trim().is_empty() && s.session.folder().is_none();
     match s.session.results() {
         Results::Idle if empty => presentation.empty_hint.as_deref(),
         Results::Done if s.session.failures().next().is_none() => {

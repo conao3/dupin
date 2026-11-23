@@ -1844,6 +1844,7 @@ impl Ui {
                     command,
                     generation,
                     query,
+                    folder,
                 } => {
                     self.action_screen = None;
                     let spec = self.session.provider_spec(&command).expect("registered provider");
@@ -1862,7 +1863,7 @@ impl Ui {
                         }
                     }
                     if let Some(searcher) = self.searchers.get(&command) {
-                        searcher.search(generation, query, limit);
+                        searcher.search(generation, query, folder, limit);
                         self.deadlines.insert(command, (generation, due));
                         tx.wake_at(due);
                     }
@@ -2013,6 +2014,7 @@ impl Ui {
                     }
                     dupin_core::Action::ChooseApplication(_)
                     | dupin_core::Action::Trash(_)
+                    | dupin_core::Action::Browse(_)
                     | dupin_core::Action::Rename(_)
                     | dupin_core::Action::ChooseDestination { .. }
                     | dupin_core::Action::DeleteClipboardEntry(_)
