@@ -24,8 +24,8 @@ const ICON_CAP: usize = 512;
 /// puts its field.
 const TOP_MARGIN: f32 = 180.0;
 
-fn panel_offsets(frame: [f64; 4], visible: [f64; 4], position: Position) -> (f32, f32) {
-    let left = visible[0] - frame[0] + ((visible[2] - f64::from(crate::PANEL_WIDTH)) / 2.0).max(0.0);
+fn panel_offsets(frame: [f64; 4], visible: [f64; 4], width: u16, position: Position) -> (f32, f32) {
+    let left = visible[0] - frame[0] + ((visible[2] - f64::from(width)) / 2.0).max(0.0);
     let top = frame[1] + frame[3] - visible[1] - visible[3];
     let room = (visible[3] - f64::from(crate::view::HEADER_H)).max(0.0);
     let offset = match position {
@@ -103,6 +103,8 @@ impl ActionScreen {
 }
 
 pub struct Ui {
+    pub theme: dupin_core::config::Theme,
+    pub active_radius: f32,
     pub action_screen: Option<ActionScreen>,
     pub session: Session,
     pub query: TextEdit,
@@ -208,6 +210,8 @@ impl Ui {
         let mut query = TextEdit::new("");
         query.focused = true;
         Ui {
+            theme: config.theme.clone(),
+            active_radius: config.theme.corner_radius as f32,
             action_screen: None,
             acknowledged_config: config.clone(),
             session: Session::new(history, registration.registry)
@@ -245,6 +249,10 @@ impl Ui {
     }
 
     pub fn apply_config(&mut self, config: &Config, tx: &mut Tx) {
+        if self.theme.panel_width != config.theme.panel_width {
+            tx.resize_window_instant((config.theme.panel_width as f32, crate::HEADER_HEIGHT));
+        }
+        self.theme = config.theme.clone();
         let previous_limit = self.session.command().result_limit;
         let ranking_changed = {
             let mut rules = self.file_demotions.write().unwrap();
@@ -412,7 +420,12 @@ impl Ui {
                         "Couldn't read the focused window; using the main display.".into()
                     });
                 }
-                let (inset, margin) = panel_offsets(screen.frame, screen.visible_frame, self.position);
+                let (inset, margin) = panel_offsets(
+                    screen.frame,
+                    screen.visible_frame,
+                    self.theme.panel_width,
+                    self.position,
+                );
                 (
                     DisplayTarget::Native(rune::NativeDisplayId::MacOS(screen.native_id)),
                     Align::Start,
@@ -937,15 +950,66 @@ mod config_tests {
     fn places_the_query_inside_the_selected_screens_visible_frame() {
         let frame = [100.0, -900.0, 1440.0, 900.0];
         let visible = [160.0, -850.0, 1380.0, 820.0];
-        assert_eq!(panel_offsets(frame, visible, Position::Center), (410.0, 408.0));
-        assert_eq!(panel_offsets(frame, visible, Position::Top), (410.0, 210.0));
+        assert_eq!(
+            panel_offsets(frame, visible, 680, Position::Center),
+            (410.0, 408.0)
+        );
+        assert_eq!(panel_offsets(frame, visible, 680, Position::Top), (410.0, 210.0));
+        assert_eq!(
+            panel_offsets(frame, visible, 400, Position::Center),
+            (550.0, 408.0)
+        );
     }
 
     #[test]
     fn top_spacing_cannot_push_the_query_below_the_visible_area() {
         let frame = [-800.0, 200.0, 800.0, 150.0];
         let visible = [-800.0, 200.0, 800.0, 120.0];
-        assert_eq!(panel_offsets(frame, visible, Position::Top), (60.0, 86.0));
+        assert_eq!(panel_offsets(frame, visible, 680, Position::Top), (60.0, 86.0));
+    }
+
+    #[test]
+    fn cosmetic_configuration_retains_query_selection_history_and_pending_search() {
+        let base = Config::default();
+        let mut session = Session::new(
+            History::default(),
+            crate::commands::configured(&base).unwrap().registry,
+        )
+        .unwrap();
+        let effects = session.set_query("example");
+        let (origin, generation) = effects
+            .iter()
+            .find_map(|effect| match effect {
+                Effect::Search {
+                    command, generation, ..
+                } => Some((command.clone(), *generation)),
+                _ => None,
+            })
+            .unwrap();
+        let before = (
+            session.query().to_owned(),
+            session.selected(),
+            session.history().clone(),
+        );
+        let mut themed = base;
+        themed.theme.row_height = 100;
+        themed.theme.light.accent = Some("#123456".into());
+        session
+            .set_commands(crate::commands::configured(&themed).unwrap().registry)
+            .unwrap();
+        assert_eq!(
+            (
+                session.query().to_owned(),
+                session.selected(),
+                session.history().clone()
+            ),
+            before
+        );
+        assert!(session.pending(&origin, generation));
+        let invalid = Config::parse("[theme]\npanel_width = nan").map_err(|e| e.to_string());
+        let (retained, problem) = reconcile_snapshot(invalid, &themed, true);
+        assert_eq!(retained.unwrap(), themed);
+        assert!(problem.is_some());
     }
 
     #[test]
