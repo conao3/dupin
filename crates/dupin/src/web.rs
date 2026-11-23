@@ -201,7 +201,8 @@ fn parses_as_web_url(probe: &str) -> bool {
 
 /// Whether `probe`, already known to start `http://` or `https://` with an authority that has
 /// no `@`, is a URL by RFC 3986: only its unreserved and reserved characters and
-/// percent-encodings, and a non-empty host with at most a numeric port.
+/// percent-encodings, and a non-empty host, or an IPv6 literal in brackets, with at most a
+/// numeric port.
 /// <https://www.rfc-editor.org/rfc/rfc3986#appendix-A>
 #[cfg(not(target_os = "macos"))]
 fn parses_as_web_url(probe: &str) -> bool {
@@ -233,7 +234,13 @@ fn parses_as_web_url(probe: &str) -> bool {
         Some((host, port)) if !authority.ends_with(']') => (host, Some(port)),
         _ => (authority, None),
     };
-    !host.is_empty() && port.is_none_or(|port| port.bytes().all(|b| b.is_ascii_digit()))
+    let host_is_valid = match host.strip_prefix('[') {
+        Some(literal) => literal
+            .strip_suffix(']')
+            .is_some_and(|ip| ip.parse::<std::net::Ipv6Addr>().is_ok()),
+        None => !host.is_empty() && !host.contains(['[', ']']),
+    };
+    host_is_valid && port.is_none_or(|port| port.bytes().all(|b| b.is_ascii_digit()))
 }
 
 fn keyword_item(catalog: &WebCatalog, raw: &str) -> Option<Item> {
@@ -532,6 +539,28 @@ mod tests {
             let (catalog, notice) = compile(&config);
             assert!(catalog.searches.is_empty());
             assert!(notice.is_some());
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn hosts_follow_rfc3986() {
+        for valid in [
+            "https://example.com/?q=x",
+            "https://[::1]/?q=x",
+            "https://[::1]:8080/?q=x",
+            "https://example.com:8080/?q=x",
+        ] {
+            assert!(super::parses_as_web_url(valid), "{valid}");
+        }
+        for invalid in [
+            "https://[]/?q=x",
+            "https://[nonsense]/?q=x",
+            "https://[::1/?q=x",
+            "https://exa]mple.com/?q=x",
+            "https://example.com:80a/?q=x",
+        ] {
+            assert!(!super::parses_as_web_url(invalid), "{invalid}");
         }
     }
 
