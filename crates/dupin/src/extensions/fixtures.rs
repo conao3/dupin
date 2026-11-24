@@ -11,10 +11,11 @@ use std::time::{Duration, Instant};
 use dupin_ext_sdk::fixture::{self, Action, Difference, Fixture};
 use dupin_extension_bridge::Trigger;
 use dupin_extension_host::{ActionEffect, Host};
+use dupin_js_runtime::row::{Row, RowEffect};
 use dupin_js_runtime::{Diagnostic, RunError};
-use dupin_plugin_protocol::{Effect, PluginItem};
 use serde_json::{Map, Value, json};
 
+use super::provider::row_item;
 use super::{ACTION_DEADLINE, Extension, QUERY_DEADLINE, helper_command, load_folder, manifest};
 
 mod services;
@@ -123,7 +124,7 @@ fn replay(
     let host = fixture_host(name, fixture)?;
     let world = services::Fixture::open(extension, name, &fixture.replies, guest_environment(fixture).now)?;
     let call = |trigger| world.bridge.call(&extension.package, trigger).services;
-    let mut rows: Vec<PluginItem> = Vec::new();
+    let mut rows: Vec<Row> = Vec::new();
     let mut selected: Option<usize> = None;
     let mut steps = Vec::new();
     for step in &fixture.steps {
@@ -166,24 +167,29 @@ fn replay(
             }
             Action::Activate(name) => {
                 let row = selected.and_then(|index| rows.get(index));
+                // The IDs the launcher gives the row's actions, which a step may name instead of
+                // a title.
                 let chosen = row.and_then(|row| {
+                    let (item, ..) = row_item(extension, row.clone(), false);
                     row.actions
                         .iter()
-                        .find(|action| action.title == name || action.id == name)
+                        .zip(&item.actions)
+                        .find(|(action, shown)| action.title == name || shown.id == name)
+                        .map(|(action, _)| action)
                 });
                 match chosen {
                     Some(action) => {
                         outcome.insert("effect".into(), Value::Object(fixture::effect(&action.effect)));
-                        if let Effect::Run { action, data } = &action.effect {
+                        if let RowEffect::Run { handler, data } = &action.effect {
                             let acted = host.action(
                                 &extension.compiled,
-                                action,
+                                handler,
                                 data.as_ref().unwrap_or(&Value::Null),
                                 Instant::now() + ACTION_DEADLINE,
                                 cancelled,
                                 &call(Trigger::Activation),
                             );
-                            match acted {
+                            match acted.map(|acted| acted.effect) {
                                 Ok(Some(ActionEffect::Toast { text })) => {
                                     outcome.insert("toasts".into(), json!([text]));
                                 }

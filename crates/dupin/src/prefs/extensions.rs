@@ -39,7 +39,16 @@ pub(super) fn page(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
         rows.push(heading(
             k,
             &format!("extension-{index}"),
-            &format!("{} ({})", extension.title, extension.keyword),
+            &format!(
+                "{} ({}{})",
+                extension.title,
+                extension.keyword,
+                if extension.main_search {
+                    ", in the main search"
+                } else {
+                    ""
+                }
+            ),
         ));
         rows.push(card(k, hair, package_rows(bridge, k, index, extension)));
     }
@@ -478,6 +487,7 @@ mod tests {
             keyword: "help".into(),
             kind: Kind::User,
             registered,
+            main_search: false,
         };
         assert_eq!(
             status(&listed(true), true, true),

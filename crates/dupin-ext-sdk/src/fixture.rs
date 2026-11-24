@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use dupin_js_runtime::Diagnostic;
-use dupin_plugin_protocol::{Effect, PluginItem, View};
+use dupin_js_runtime::row::{Row, RowEffect};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
@@ -581,29 +581,31 @@ pub fn to_json(fixture: &Fixture) -> String {
 }
 
 /// The rows of an answer as fixtures state them: what Dupin shows and what each action does.
-pub fn rows(items: &[PluginItem]) -> Value {
-    items
-        .iter()
-        .map(|item| {
-            let mut row = Map::new();
-            row.insert("id".into(), item.id.clone().into());
-            match &item.view {
-                View::Text { title, subtitle } => {
-                    row.insert("title".into(), title.clone().into());
-                    if !subtitle.is_empty() {
-                        row.insert("subtitle".into(), subtitle.clone().into());
-                    }
-                }
-                View::Detail { title, body } => {
-                    row.insert("title".into(), title.clone().into());
-                    row.insert("detail".into(), body.clone().into());
-                }
-                View::Pair { source, result } => {
-                    row.insert("source".into(), source.clone().into());
-                    row.insert("result".into(), result.clone().into());
-                }
+pub fn rows(rows: &[Row]) -> Value {
+    rows.iter()
+        .map(|row| {
+            let mut out = Map::new();
+            out.insert("id".into(), row.id.clone().into());
+            out.insert("title".into(), row.title.clone().into());
+            if !row.subtitle.is_empty() {
+                out.insert("subtitle".into(), row.subtitle.clone().into());
             }
-            let actions: Vec<Value> = item
+            if !row.keywords.is_empty() {
+                out.insert("keywords".into(), row.keywords.clone().into());
+            }
+            if let Some(icon) = &row.icon {
+                out.insert("icon".into(), icon.clone().into());
+            }
+            if let Some(section) = &row.section {
+                out.insert("section".into(), section.clone().into());
+            }
+            if let Some(detail) = &row.detail {
+                out.insert(
+                    "detail".into(),
+                    serde_json::to_value(detail).expect("a detail always serializes"),
+                );
+            }
+            let actions: Vec<Value> = row
                 .actions
                 .iter()
                 .map(|action| {
@@ -612,20 +614,18 @@ pub fn rows(items: &[PluginItem]) -> Value {
                     Value::Object(entry)
                 })
                 .collect();
-            row.insert("actions".into(), actions.into());
-            Value::Object(row)
+            out.insert("actions".into(), actions.into());
+            Value::Object(out)
         })
         .collect()
 }
 
-/// What choosing an action does, as `{ "copy": … }`, `{ "url": … }`, `{ "push": … }` or
-/// `{ "run": … }`.
-pub fn effect(effect: &Effect) -> Map<String, Value> {
+/// What choosing an action does, as `{ "copy": … }`, `{ "url": … }` or `{ "run": … }`.
+pub fn effect(effect: &RowEffect) -> Map<String, Value> {
     let (key, value) = match effect {
-        Effect::Copy { text } => ("copy", Value::from(text.clone())),
-        Effect::OpenUrl { url } => ("url", Value::from(url.clone())),
-        Effect::Push { view, title, .. } => ("push", json!({"view": view, "title": title})),
-        Effect::Run { action, data } => ("run", json!({"action": action, "data": data})),
+        RowEffect::Copy { text } => ("copy", Value::from(text.clone())),
+        RowEffect::OpenUrl { url } => ("url", Value::from(url.clone())),
+        RowEffect::Run { handler, data } => ("run", json!({"action": handler, "data": data})),
     };
     Map::from_iter([(key.to_owned(), value)])
 }

@@ -8,8 +8,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use dupin_extension_host::{ActionEffect, Compiled, Host};
-use dupin_js_runtime::{DEFAULT_ENTRY, RunError, Sources};
-use dupin_plugin_protocol::{PluginItem, View};
+use dupin_js_runtime::{Acted, DEFAULT_ENTRY, Row, RunError, Sources};
 
 use super::services::fixture;
 use super::*;
@@ -126,7 +125,7 @@ fn world_with(
 }
 
 impl World {
-    fn search(&self, query: &str) -> Result<Vec<PluginItem>, RunError> {
+    fn search(&self, query: &str) -> Result<Vec<Row>, RunError> {
         let call = self.bridge.call(&self.id, Trigger::Query);
         self.host.search(
             &self.package,
@@ -138,7 +137,7 @@ impl World {
         )
     }
 
-    fn act(&self, name: &str, data: serde_json::Value) -> Result<Option<ActionEffect>, RunError> {
+    fn act(&self, name: &str, data: serde_json::Value) -> Result<Acted, RunError> {
         let call = self.bridge.call(&self.id, Trigger::Activation);
         self.host.action(
             &self.package,
@@ -151,15 +150,11 @@ impl World {
     }
 
     fn first(&self, query: &str) -> String {
-        let rows = self.search(query).unwrap();
-        match &rows[0].view {
-            View::Text { title, .. } => title.clone(),
-            other => panic!("{other:?}"),
-        }
+        self.search(query).unwrap().remove(0).title
     }
 
     fn toast(&self, name: &str) -> String {
-        match self.act(name, serde_json::Value::Null).unwrap() {
+        match self.act(name, serde_json::Value::Null).unwrap().effect {
             Some(ActionEffect::Toast { text }) => text,
             other => panic!("{other:?}"),
         }
@@ -638,10 +633,7 @@ fn revoking_while_a_request_runs_drops_its_result_and_the_call_is_stale() {
         .revoke(&world.id, &"http:https://api.example.com".parse().unwrap())
         .unwrap();
     let rows = searching.join().unwrap().unwrap();
-    let View::Text { title, .. } = &rows[0].view else {
-        unreachable!()
-    };
-    assert_eq!(title, "revoked");
+    assert_eq!(rows[0].title, "revoked");
     assert_eq!(
         world.http.finished.load(Ordering::Relaxed),
         1,

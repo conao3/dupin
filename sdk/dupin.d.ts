@@ -20,44 +20,137 @@ declare module 'dupin' {
 	}
 
 	/**
-	 * One row. Enter runs Open URL when `url` is set, otherwise Copy when `text` is set, otherwise
-	 * the first of `actions`. Any other field fails the whole answer.
+	 * One row. Enter runs its first action: Open URL when `url` is set, then Copy when `text` is
+	 * set, then `actions` in order. Any other field fails the whole answer.
 	 */
 	export interface Item {
 		/** One line, up to 512 bytes. */
 		title: string;
 		/** Up to 2,048 bytes. */
 		subtitle?: string;
-		/** Unique among the items, up to 128 bytes. Dupin numbers items without one. */
+		/** Unique among the items, up to 128 bytes. Dupin numbers `search` items without one. */
 		id?: string;
 		/** An `http` or `https` URL with a host, up to 2,048 bytes. */
 		url?: string;
 		/** Non-empty, up to 16 KiB. */
 		text?: string;
-		/** Named handlers of the module's `actions` export. Eight actions at most, `url` and `text` included. */
-		actions?: ItemAction[];
+		/** An image in the package (`.png`, `.jpg`, `.jpeg`, `.svg`, `.pdf` or `.icns`), relative to `package.json`. */
+		icon?: string;
+		/** The heading the item is listed under; a section's items get its title. Up to 128 bytes. */
+		section?: string;
+		/** Shown while the item is selected. */
+		detail?: DetailPane;
+		/** Up to eight, counting the ones `url` and `text` add. */
+		actions?: Action[];
 	}
 
 	/** Runs `actions[run](data, ctx)` when the user chooses it. */
 	export interface ItemAction {
 		/** One line, up to 512 bytes. */
 		title: string;
-		/** A key of the module's `actions` export, up to 64 bytes. */
+		/** A key of the module's `actions` export: up to 64 letters, digits, `_` or `$`. */
 		run: string;
-		/** Passed to the handler as JSON: at most 4 KiB, nested at most 16 deep. */
+		/** Passed to the handler as JSON, or `null` without it: at most 4 KiB, nested at most 16 deep. */
 		data?: Json;
 	}
 
-	export interface List {
-		type?: 'list';
-		items: Item[];
+	/** An item of an `items` catalogue, which may carry words that also find it. */
+	export interface CatalogueItem extends Item {
+		/**
+		 * Required, and kept with the item as the list changes: Dupin applies updates and
+		 * remembers which items are picked by it.
+		 */
+		id: string;
+		/** Up to 16 words of up to 64 bytes, matched below an equal match on the title. */
+		keywords?: string[];
 	}
+
+	export interface Metadata {
+		/** One line, up to 64 bytes. */
+		label: string;
+		/** One line, up to 512 bytes. */
+		text: string;
+	}
+
+	export interface DetailPane {
+		/** Up to 32 KiB: headings, paragraphs, emphasis, lists, inline and fenced code and HTTP(S) links. */
+		markdown?: string;
+		/** Up to 12 entries, above the Markdown. */
+		metadata?: Metadata[];
+	}
+
+	export type Action =
+		| { title: string; copy: string }
+		| { title: string; open: string }
+		| ItemAction;
+
+	export interface Section<T extends Item = Item> {
+		title: string;
+		items: T[];
+	}
+
+	export type List = { type?: 'list'; items: Item[] } | { type?: 'list'; sections: Section[] };
 
 	/** Up to 50 items and 256 KiB of text. */
 	export type SearchResult = Item[] | List;
 
-	/** The entry module's `search` export. It runs as the user types, so it may only read. */
+	/** The entry module's `search` export: answers computed for each query. It runs as the user types, so it may only read. */
 	export type Search = (query: string, ctx: SearchContext) => SearchResult | Promise<SearchResult>;
+
+	/** What `items` receives. Dupin freezes it. */
+	export interface ItemsContext {
+		/** What the previous answer's `cursor` was, or null when Dupin holds no catalogue. */
+		readonly cursor: string | null;
+		/**
+		 * `load` when Dupin holds nothing, `more` after an answer with `more: true`, `expired`
+		 * after its `ttl` and `invalidated` after an action called `items.invalidate()`.
+		 */
+		readonly reason: 'load' | 'more' | 'expired' | 'invalidated';
+	}
+
+	interface CatalogueAnswer {
+		/** Seconds, from 1 to 86,400, until Dupin asks again. Without it, it asks again only when invalidated. */
+		ttl?: number;
+		/** Up to 256 bytes, handed back as `ctx.cursor` next time. */
+		cursor?: string;
+		/** Ask again at once, with `cursor`, for the next part. */
+		more?: boolean;
+	}
+
+	/** The whole catalogue, replacing what Dupin holds, or its first part with `more`. */
+	export type CatalogueList = CatalogueAnswer &
+		(
+			| { type?: 'list'; items: CatalogueItem[] }
+			| { type?: 'list'; sections: Section<CatalogueItem>[] }
+		);
+
+	/** Changes to the catalogue Dupin holds, by item `id`. */
+	export interface CatalogueUpdate extends CatalogueAnswer {
+		type: 'update';
+		/** Items Dupin doesn't hold yet, after the others. */
+		append?: CatalogueItem[];
+		/** Items that take the place of the ones with their `id`. */
+		replace?: CatalogueItem[];
+		/** The `id` of each item to drop. */
+		remove?: string[];
+	}
+
+	/** Up to 500 items, or 500 removals, and 1 MiB of text in one answer. */
+	export type ItemsResult = CatalogueItem[] | CatalogueList | CatalogueUpdate;
+
+	/**
+	 * The entry module's `items` export: a catalogue Dupin holds and matches natively as the
+	 * user types, asking again only on first use, after `ttl` or when an action invalidates it.
+	 * At most 10,000 items and 8 MiB of text. It reaches no host service: a request fails with
+	 * `unavailable`.
+	 */
+	export type Items = (ctx: ItemsContext) => ItemsResult | Promise<ItemsResult>;
+
+	/** The host's catalogue controls. */
+	export const items: {
+		/** From an action handler: ask `items` again, with its cursor, before the next use. */
+		invalidate(): void;
+	};
 
 	/** What an action may ask Dupin to do once it has run. */
 	export type ActionEffect = { type: 'toast'; text: string };
@@ -111,8 +204,10 @@ declare module 'dupin' {
 		title: string;
 		/** Typed before a space to reach the extension. Up to 32 bytes, no spaces. */
 		keyword: string;
-		/** The module that exports `search`, inside the package. Defaults to `main.js`. */
+		/** The module that exports `search` or `items`, inside the package. Defaults to `main.js`. */
 		main?: `${string}.js` | `${string}.mjs` | `${string}.ts` | `${string}.mts` | `${string}.tsx`;
+		/** List the `items` catalogue in the main search too, ranked with apps. The package never sees what is typed there. */
+		defaultSearch?: boolean;
 		/** The most the extension may do. The user allows each scope separately. */
 		capabilities?: Capabilities;
 	}
@@ -323,41 +418,11 @@ declare module 'dupin' {
 	 * apiVersion 2 hosts provide none of it: the `dupin` module exports no such values and an
 	 * item with these fields is rejected. Shapes may change before they ship.
 	 */
-	export namespace v2 {
+	export namespace planned {
 		type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 
-		/** `items(ctx)`: a list source. Dupin caches the rows and matches them as the user types. */
-		type Items = (ctx: ItemsContext) => ListResult | Promise<ListResult>;
-
-		interface ItemsContext {
-			readonly limit: number;
-			readonly preferences: Readonly<Record<string, string | boolean>>;
-		}
-
-		interface Item {
-			title: string;
-			subtitle?: string;
-			id?: string;
-			url?: string;
-			text?: string;
-			/** Extra words native matching considers. */
-			keywords?: string[];
-			/** A built-in icon name. */
-			icon?: string;
-			/** Up to three text or tag accessories. */
-			accessories?: Accessory[];
-			/** Shown in the selected-item Detail pane. */
-			detail?: DetailPane;
-			/** Up to eight. Enter runs the first. */
-			actions?: Action[];
-		}
-
+		/** Up to three text or tag accessories beside an item. */
 		type Accessory = { text: string } | { tag: string };
-
-		interface Section {
-			title: string;
-			items: Item[];
-		}
 
 		interface List {
 			type: 'list';
@@ -365,19 +430,6 @@ declare module 'dupin' {
 			sections?: Section[];
 			/** Shown when there are no items. */
 			emptyText?: string;
-		}
-
-		type ListResult = Item[] | List;
-
-		interface Metadata {
-			label: string;
-			text: string;
-		}
-
-		interface DetailPane {
-			/** Headings, paragraphs, emphasis, lists, inline and fenced code and HTTP(S) links. */
-			markdown?: string;
-			metadata?: Metadata[];
 		}
 
 		interface Detail extends DetailPane {
@@ -423,6 +475,10 @@ declare module 'dupin' {
 			| { title: string; push: { view: string; state?: Json } }
 			| { title: string; run: string; data?: Json; destructive?: boolean };
 
+		interface ItemsContext {
+			readonly preferences: Readonly<Record<string, string | boolean>>;
+		}
+
 		type Effect =
 			| { type: 'push'; view: string; state?: Json }
 			| { type: 'pop' }
@@ -431,7 +487,7 @@ declare module 'dupin' {
 			| { type: 'toast'; text: string }
 			| { type: 'fieldErrors'; errors: Record<string, string> };
 
-		/** `actions`: named handlers that run on explicit activation, including form submit. */
+		/** `actions` handlers that return an effect and see the view, including on form submit. */
 		type Actions = Record<
 			string,
 			(data: Json, ctx: ViewContext) => Effect | void | Promise<Effect | void>

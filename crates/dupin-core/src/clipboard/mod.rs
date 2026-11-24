@@ -586,7 +586,7 @@ fn item(entry: &Entry, title: String, matched: Vec<usize>, now: u64, exists: fn(
             }
             reveal = present.first().cloned();
             (
-                reveal.clone(),
+                reveal.clone().map(crate::Icon::File),
                 Payload {
                     text: None,
                     paths: present,

@@ -7,15 +7,17 @@
 
 use std::io::{self, Read, Write};
 
-use dupin_js_runtime::{ActionEffect, Diagnostic, Environment};
-use dupin_plugin_protocol::PluginItem;
+use dupin_js_runtime::row::MAX_PAGE_BYTES;
+use dupin_js_runtime::{Acted, CataloguePage, Diagnostic, Environment, Exports, Reason, Row};
 use serde::{Deserialize, Serialize};
 
 /// Raised whenever a message changes shape. The helper states its version first, and Dupin
 /// stops a helper that states another.
-pub const VERSION: u32 = 4;
-/// Comfortably above the largest answer, 50 rows within 256 KiB of text.
-const MAX_HEADER_BYTES: usize = 1024 * 1024;
+pub const VERSION: u32 = 5;
+/// Above the largest answer, part of a catalogue with [`MAX_PAGE_BYTES`] of text. JSON writes a
+/// control character, which copy text and Markdown may hold, as six bytes (`\u0001`), and the
+/// rest covers the field names and punctuation of the most rows and fields a part may have.
+const MAX_HEADER_BYTES: usize = 6 * MAX_PAGE_BYTES + 2 * 1024 * 1024;
 /// A package's bytecode, from at most 4 MiB of JavaScript.
 pub const MAX_TAIL_BYTES: usize = 32 * 1024 * 1024;
 
@@ -56,6 +58,10 @@ pub enum Call {
     Search {
         query: String,
         limit: u32,
+    },
+    Items {
+        cursor: Option<String>,
+        reason: Reason,
     },
     /// `actions[name](data)`, which the user chose.
     Action {
@@ -100,12 +106,17 @@ pub enum Answer {
     Compiled {
         modules: Vec<ModuleSpan>,
     },
-    Checked,
+    Checked {
+        exports: Exports,
+    },
     Rows {
-        items: Vec<PluginItem>,
+        items: Vec<Row>,
+    },
+    Catalogue {
+        page: CataloguePage,
     },
     Acted {
-        effect: Option<ActionEffect>,
+        acted: Acted,
     },
     Handled,
     Cancelled,
@@ -234,6 +245,75 @@ mod tests {
         write(&mut cut, &ToHelper::Cancel { id: 2 }, &[]).unwrap();
         cut.pop();
         assert!(read::<ToHelper>(&mut &cut[..]).is_err());
+    }
+
+    /// The most rows and fields a part may have, its text all control characters, which JSON
+    /// writes at six bytes each.
+    fn largest_catalogue_part() -> CataloguePage {
+        use dupin_js_runtime::row::{MAX_PAGE_ROWS, Metadata, PageChange, RowAction, RowDetail, RowEffect};
+
+        let control = |len: usize| "\u{1}".repeat(len);
+        let mut rows: Vec<Row> = (0..MAX_PAGE_ROWS)
+            .map(|index| Row {
+                id: index.to_string(),
+                title: "a".into(),
+                subtitle: control(1),
+                keywords: vec!["a".into(); 16],
+                icon: Some("a.png".into()),
+                section: Some("a".into()),
+                detail: Some(RowDetail {
+                    markdown: String::new(),
+                    metadata: vec![
+                        Metadata {
+                            label: "a".into(),
+                            text: "a".into(),
+                        };
+                        12
+                    ],
+                }),
+                actions: vec![
+                    RowAction {
+                        title: "a".into(),
+                        effect: RowEffect::Copy { text: control(1) },
+                    };
+                    8
+                ],
+            })
+            .collect();
+        let mut left = MAX_PAGE_BYTES - rows.iter().map(Row::text_bytes).sum::<usize>();
+        for row in &mut rows {
+            let len = left.min(32 * 1024);
+            row.detail.as_mut().expect("set above").markdown = control(len);
+            left -= len;
+        }
+        assert_eq!(left, 0);
+        CataloguePage {
+            change: PageChange::Reset { rows },
+            ttl: Some(1),
+            cursor: Some("a".repeat(256)),
+            more: true,
+        }
+    }
+
+    #[test]
+    fn the_largest_catalogue_part_fits_a_frame() {
+        let page = largest_catalogue_part();
+        page.validate().unwrap();
+        let message = FromHelper::Done {
+            id: u64::MAX,
+            answer: Answer::Catalogue { page },
+        };
+        let mut bytes = Vec::new();
+        write(&mut bytes, &message, &[]).unwrap();
+        assert!(bytes.len() > 6 * MAX_PAGE_BYTES, "{}", bytes.len());
+        let (read, _) = read::<FromHelper>(&mut &bytes[..]).unwrap().unwrap();
+        assert!(matches!(
+            read,
+            FromHelper::Done {
+                answer: Answer::Catalogue { .. },
+                ..
+            }
+        ));
     }
 
     #[test]

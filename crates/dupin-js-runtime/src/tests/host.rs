@@ -1,6 +1,7 @@
 use std::collections::{HashMap, VecDeque};
 
 use super::*;
+use crate::row::RowEffect;
 
 /// Answers each request with the reply set for its operation, or a denial, and records what it
 /// was sent.
@@ -37,20 +38,15 @@ impl Bridge for Fixture {
     }
 }
 
-fn with_host(source: &str, query: &str, bridge: &mut Fixture) -> Result<Vec<PluginItem>, RunError> {
+fn with_host(source: &str, query: &str, bridge: &mut Fixture) -> Result<Vec<Row>, RunError> {
     let (_folder, loaded) = package(&[("main.js", source)]);
     loaded
         .unwrap()
         .search_with(query, MAX_ROWS, timeout(DEADLINE), bridge)
 }
 
-fn titles(rows: &[PluginItem]) -> Vec<String> {
-    rows.iter()
-        .map(|row| match &row.view {
-            View::Text { title, .. } => title.clone(),
-            other => panic!("{other:?}"),
-        })
-        .collect()
+fn titles(rows: &[Row]) -> Vec<String> {
+    rows.iter().map(|row| row.title.clone()).collect()
 }
 
 fn failure_of<T: std::fmt::Debug>(result: Result<T, RunError>) -> Diagnostic {
@@ -246,19 +242,19 @@ fn items_offer_named_actions_with_bounded_data() {
     assert_eq!(
         effects,
         [
-            &Effect::Copy { text: "body".into() },
-            &Effect::Run {
-                action: "save".into(),
+            &RowEffect::Copy { text: "body".into() },
+            &RowEffect::Run {
+                handler: "save".into(),
                 data: Some(serde_json::json!({"id": 7}))
             },
-            &Effect::Run {
-                action: "pin".into(),
+            &RowEffect::Run {
+                handler: "pin".into(),
                 data: None
             },
         ]
     );
     for (actions, field) in [
-        ("{ title: 'x' }", "items[0].actions[0].run"),
+        ("{ title: 'x' }", "items[0].actions[0]"),
         ("{ title: 'x', run: 'y', go: 1 }", "items[0].actions[0].go"),
         (
             "{ title: 'x', run: 'y', data: 'z'.repeat(5000) }",
@@ -284,7 +280,10 @@ fn items_offer_named_actions_with_bounded_data() {
 
 fn act(source: &str, name: &str, data: &str, bridge: &mut Fixture) -> Result<Option<ActionEffect>, RunError> {
     let (_folder, loaded) = package(&[("main.js", source)]);
-    loaded.unwrap().action(name, data, timeout(DEADLINE), bridge)
+    loaded
+        .unwrap()
+        .action(name, data, timeout(DEADLINE), bridge)
+        .map(|acted| acted.effect)
 }
 
 #[test]

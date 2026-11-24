@@ -3,7 +3,7 @@
 //! queue through a [`Bridge`] and settles each promise with Dupin's reply. The guest never
 //! learns why a call ran (typing, an action, an event): Dupin attaches that itself.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -20,13 +20,24 @@ pub const MAX_OP_BYTES: usize = 64;
 pub const MAX_ARGS_BYTES: usize = 2 * 1024 * 1024;
 
 const NATIVE: &str = "__dupinHost";
+const INVALIDATE: &str = "__dupinInvalidate";
 
 /// What the `dupin` module exports. `host` is captured and deleted before any package module
 /// that imports `dupin` runs.
 pub(crate) const SOURCE: &str = r#"const host = globalThis.__dupinHost;
 delete globalThis.__dupinHost;
+const invalidate = globalThis.__dupinInvalidate;
+delete globalThis.__dupinInvalidate;
 
 export const apiVersion = 2;
+
+export const items = Object.freeze({
+	invalidate() {
+		if (typeof invalidate !== 'function' || !invalidate()) {
+			throw new Error('items.invalidate() works only in an action handler');
+		}
+	},
+});
 
 export class DupinError extends Error {
 	constructor(error) {
@@ -266,8 +277,21 @@ pub(crate) struct Calls {
 
 pub(crate) type Shared = Rc<RefCell<Calls>>;
 
-/// Installs the native function the `dupin` module captures.
-pub(crate) fn install<'js>(ctx: &Ctx<'js>, calls: &Shared) -> rquickjs::Result<()> {
+/// Installs the native functions the `dupin` module captures. `invalidated` is set when an
+/// action calls `items.invalidate()`; any other call gets `None`, and the guest an error.
+pub(crate) fn install<'js>(
+    ctx: &Ctx<'js>,
+    calls: &Shared,
+    invalidated: Option<Rc<Cell<bool>>>,
+) -> rquickjs::Result<()> {
+    let invalidate = Function::new(ctx.clone(), move || match &invalidated {
+        Some(invalidated) => {
+            invalidated.set(true);
+            true
+        }
+        None => false,
+    })?;
+    ctx.globals().set(INVALIDATE, invalidate)?;
     let calls = calls.clone();
     let native = Function::new(
         ctx.clone(),

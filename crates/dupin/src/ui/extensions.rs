@@ -4,12 +4,12 @@ use std::time::Instant;
 
 use dupin_core::{CommandId, ExtensionRequest};
 use dupin_extension_bridge::{Bridge, Notice, ScopeKey, Trigger};
-use dupin_js_runtime::RunError;
+use dupin_js_runtime::{Acted, RunError};
 use rune::Tx;
 
 use super::{Busy, Ui, search::spawn_searcher};
 use crate::extensions::packages::Packages;
-use crate::extensions::{ACTION_DEADLINE, Catalog, Extension, Origin, Watch};
+use crate::extensions::{ACTION_DEADLINE, Catalog, Extension, Origin, Role, Watch};
 
 /// The bundled extensions, always, and the extensions folder while `extensions = true`; which
 /// of them run; and which own a command and searcher now.
@@ -20,7 +20,7 @@ pub(super) struct Extensions {
     /// What [`Packages::active`] returned at the last registry install, to tell whether a
     /// change of the user's choices needs another.
     active: Vec<Arc<Extension>>,
-    registered: HashMap<CommandId, Arc<Extension>>,
+    registered: HashMap<CommandId, (Arc<Extension>, Role)>,
     /// Every guest call's host requests go through it.
     pub(super) bridge: Bridge,
 }
@@ -132,39 +132,47 @@ impl Ui {
         let active = self.extensions.packages.active();
         let added = crate::features::extensions::add_extensions(registration, &active);
         self.extensions.active = active;
-        let registered: HashMap<_, _> = added.registered.into_iter().collect();
+        let registered: HashMap<_, _> = added
+            .registered
+            .into_iter()
+            .map(|(id, extension, role)| (id, (extension, role)))
+            .collect();
         let current = self.session.command_id();
-        let active_changed = registered.get(current).is_some_and(|next| {
+        let active_changed = registered.get(current).is_some_and(|(next, _)| {
             self.extensions
                 .registered
                 .get(current)
-                .is_some_and(|current| !Arc::ptr_eq(next, current))
+                .is_some_and(|(current, _)| !Arc::ptr_eq(next, current))
         });
-        self.extensions.registered.retain(|id, extension| {
+        self.extensions.registered.retain(|id, (extension, _)| {
             let keep = registered
                 .get(id)
-                .is_some_and(|next| Arc::ptr_eq(next, extension));
+                .is_some_and(|(next, _)| Arc::ptr_eq(next, extension));
             if !keep {
                 self.searchers.remove(id);
                 self.deadlines.remove(id);
             }
             keep
         });
-        for (id, extension) in registered {
+        for (id, (extension, role)) in registered {
             if self.extensions.registered.contains_key(&id) {
                 continue;
             }
-            let provider =
-                crate::features::extensions::provider(extension.clone(), self.extensions.bridge.clone());
+            let provider = crate::features::extensions::provider(
+                extension.clone(),
+                role,
+                self.extensions.bridge.clone(),
+            );
             let searcher = spawn_searcher(self.me.clone(), id.clone(), provider);
             self.searchers.insert(id.clone(), searcher);
-            self.extensions.registered.insert(id, extension);
+            self.extensions.registered.insert(id, (extension, role));
         }
         let routed: Vec<_> = self.extensions.registered.values().cloned().collect();
-        let listing = self
-            .extensions
-            .packages
-            .listing(|extension| routed.iter().any(|routed| std::ptr::eq(&**routed, extension)));
+        let listing = self.extensions.packages.listing(|extension| {
+            routed
+                .iter()
+                .any(|(routed, role)| *role == Role::Keyword && std::ptr::eq(&**routed, extension))
+        });
         let problems: Vec<_> = self
             .extensions
             .bundled
@@ -226,7 +234,7 @@ impl Ui {
                 .extensions
                 .registered
                 .iter()
-                .filter(|(_, extension)| extension.package == *id)
+                .filter(|(_, (extension, _))| extension.package == *id)
                 .map(|(command, _)| command.clone())
                 .collect();
             for command in commands {
@@ -252,12 +260,12 @@ impl Ui {
         self.extensions
             .registered
             .values()
-            .find(|extension| extension.id == id)
-            .cloned()
+            .find(|(extension, _)| extension.id == id)
+            .map(|(extension, _)| extension.clone())
     }
 
     /// Runs a row's extension action, which the user chose: the only calls that carry an
-    /// activation.
+    /// activation. Searching again afterwards shows a catalogue the action invalidated.
     pub(super) fn run_extension_request(
         &mut self,
         extension: String,
@@ -285,11 +293,14 @@ impl Ui {
                     _ if stale => Some(format!(
                         "{name}'s access changed while it ran, so its result was dropped."
                     )),
-                    Ok(Some(dupin_extension_host::ActionEffect::Toast { text })) => {
+                    Ok(Acted {
+                        effect: Some(dupin_extension_host::ActionEffect::Toast { text }),
+                        ..
+                    }) => {
                         ui.timed_notice(text, tx);
                         None
                     }
-                    Ok(None) | Err(RunError::Cancelled) => None,
+                    Ok(Acted { effect: None, .. }) | Err(RunError::Cancelled) => None,
                     Err(RunError::Failed(diagnostic)) => {
                         crate::log::warn(&format!("extension {name}: {diagnostic}"));
                         Some(format!("{name} failed: {}", diagnostic.message))

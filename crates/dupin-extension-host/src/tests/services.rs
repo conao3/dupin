@@ -60,10 +60,7 @@ fn host_requests_cross_to_dupin_and_back_during_a_search() {
         )
         .unwrap();
     assert_eq!(titles(&rows), ["stored \"count\""]);
-    let View::Text { subtitle, .. } = &rows[0].view else {
-        unreachable!()
-    };
-    assert_eq!(subtitle, "denied: clipboard.read is not allowed");
+    assert_eq!(rows[0].subtitle, "denied: clipboard.read is not allowed");
     assert_eq!(
         *fixture.seen.lock().unwrap(),
         [
@@ -84,7 +81,7 @@ fn actions_and_events_run_in_the_helper_with_their_data() {
            export const events = { async clipboard(change) { await storage.get(change.text); } };"#,
     );
     let fixture = Arc::new(Fixture::default());
-    let effect = host
+    let acted = host
         .action(
             &package,
             "show",
@@ -95,7 +92,7 @@ fn actions_and_events_run_in_the_helper_with_their_data() {
         )
         .unwrap();
     assert_eq!(
-        effect,
+        acted.effect,
         Some(ActionEffect::Toast {
             text: "stored \"k\"".into()
         })

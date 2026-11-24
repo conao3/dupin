@@ -1,14 +1,19 @@
 //! Extensions, each routed by one keyword: those bundled with Dupin and the user's own in
 //! `extensions/<name>/` beside config.toml. Each is a JavaScript package compiled and run by
-//! QuickJS-ng in the sandboxed extension host process. Guests get the query and return rows.
-//! They reach host services only through the broker bridge, which checks each request against
-//! the scopes a package declares and the user granted.
+//! QuickJS-ng in the sandboxed extension host process. Guests get the query and return rows, or
+//! hand over a catalogue Dupin matches itself. They reach host services only through the broker
+//! bridge, which checks each request against the scopes a package declares and the user granted.
 
 pub mod access;
 pub mod bundled;
+mod catalogue;
 mod fixtures;
+#[cfg(test)]
+mod items_tests;
 mod manifest;
 pub mod packages;
+#[cfg(test)]
+pub(crate) mod parity;
 mod provider;
 
 use std::collections::HashMap;
@@ -17,15 +22,14 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 use std::time::{Instant, SystemTime};
 
-use dupin_core::Page;
+use dupin_core::{Batch, Page};
 use dupin_extension_bridge::{Capabilities, PackageId, Revision};
-use dupin_extension_host::{ActionEffect, Compiled, Host, Services};
-use dupin_js_runtime::{Diagnostic, RunError, Sources};
-use dupin_plugin_protocol::PluginItem;
+use dupin_extension_host::{Compiled, Host, Services};
+use dupin_js_runtime::{Acted, Diagnostic, Exports, Row, RunError, Sources};
 
 pub use fixtures::{Snapped, snap, test};
 pub(crate) use provider::is_answered_consent_row;
-pub use provider::{ACTION_DEADLINE, ExtensionProvider, QUERY_DEADLINE};
+pub use provider::{ACTION_DEADLINE, ExtensionProvider, QUERY_DEADLINE, Role, answer};
 
 pub(crate) use crate::catalog_watch::Watch;
 
@@ -37,6 +41,13 @@ pub struct Extension {
     pub name: String,
     pub version: String,
     pub keyword: String,
+    /// The package's folder, which row icons are relative to.
+    pub root: PathBuf,
+    /// The package asked for its catalogue to answer the default search too.
+    pub default_search: bool,
+    /// What the package exports, once a call has linked it.
+    exports: OnceLock<Exports>,
+    catalogue: catalogue::Cached,
     /// What the broker knows the package by: its `name`, or `bundled:<name>` for one that
     /// ships with Dupin.
     pub package: PackageId,
@@ -66,9 +77,14 @@ impl std::fmt::Debug for Extension {
 }
 
 impl Extension {
-    /// Links the package and checks that its entry exports `search`.
-    pub fn check(&self, deadline: Instant) -> Result<(), RunError> {
-        host().check(&self.compiled, deadline, &|| false)
+    /// Links the package and reports which of `search` and `items` its entry exports, which
+    /// must be at least one.
+    pub fn check(&self, deadline: Instant) -> Result<Exports, RunError> {
+        if let Some(exports) = self.exports.get() {
+            return Ok(*exports);
+        }
+        let exports = host().check(&self.compiled, deadline, &|| false)?;
+        Ok(*self.exports.get_or_init(|| exports))
     }
 
     /// Asks the guest for `query`, answering its host requests with `services`. Extensions
@@ -81,25 +97,27 @@ impl Extension {
         deadline: Instant,
         is_cancelled: impl Fn() -> bool + 'static,
         services: &Arc<dyn Services>,
-    ) -> Result<Vec<PluginItem>, RunError> {
+    ) -> Result<Vec<Row>, RunError> {
         if page.is_some() {
-            return Err(RunError::Failed(Diagnostic::new(
-                "unsupported-view",
-                "extensions can't open views yet",
-            )));
+            return Err(views_unsupported());
         }
         host().search(&self.compiled, query, limit, deadline, &is_cancelled, services)
     }
 
-    /// Runs `actions[name](data)`, which the user chose.
+    /// Runs `actions[name](data)`, which the user chose from one of the package's rows, and
+    /// asks for the catalogue again if the handler invalidated it.
     pub fn act(
         &self,
         name: &str,
         data: &serde_json::Value,
         deadline: Instant,
         services: &Arc<dyn Services>,
-    ) -> Result<Option<ActionEffect>, RunError> {
-        host().action(&self.compiled, name, data, deadline, &|| false, services)
+    ) -> Result<Acted, RunError> {
+        let acted = host().action(&self.compiled, name, data, deadline, &|| false, services)?;
+        if acted.invalidated {
+            self.catalogue.invalidate();
+        }
+        Ok(acted)
     }
 
     /// Runs `events[name](event)` for something Dupin watched on the package's behalf.
@@ -112,6 +130,30 @@ impl Extension {
     ) -> Result<(), RunError> {
         host().event(&self.compiled, name, event, deadline, &|| false, services)
     }
+
+    /// The catalogue's rows for `query`, asking the package for its catalogue first when Dupin
+    /// holds none or it went stale. Typing never cancels that, since the next keystroke needs
+    /// the same catalogue. Every part of it must arrive before `deadline`, the search's own, so
+    /// a slow catalogue fails with its own diagnostic before the search expires.
+    pub fn catalogue(&self, query: &str, limit: usize, deadline: Instant) -> Result<Vec<Batch>, RunError> {
+        let mut fetch =
+            |cursor: Option<&str>, reason| host().items(&self.compiled, cursor, reason, deadline, &|| false);
+        self.catalogue
+            .search(query, limit, &mut fetch, self)
+            .map_err(|error| match error {
+                RunError::Failed(diagnostic) if diagnostic.file.is_none() => {
+                    RunError::Failed(diagnostic.file(self.compiled.entry()))
+                }
+                error => error,
+            })
+    }
+}
+
+fn views_unsupported() -> RunError {
+    RunError::Failed(Diagnostic::new(
+        "unsupported-view",
+        "extensions can't open views yet",
+    ))
 }
 
 /// The one extension host every JavaScript extension shares, started on the first query.
@@ -346,6 +388,10 @@ fn load_with(
             name: manifest.name,
             version: manifest.version,
             keyword: manifest.keyword,
+            root: folder.to_path_buf(),
+            default_search: manifest.default_search,
+            exports: OnceLock::new(),
+            catalogue: catalogue::Cached::default(),
             package,
             revision,
             capabilities: manifest.capabilities,
@@ -525,6 +571,10 @@ pub(crate) mod tests {
             name: name.into(),
             version: "1.0.0".into(),
             keyword: keyword.into(),
+            root: PathBuf::from("/fixture"),
+            default_search: false,
+            exports: OnceLock::new(),
+            catalogue: catalogue::Cached::default(),
             revision: Revision::new("blake3:fixture").unwrap(),
             capabilities: Capabilities::default(),
             compiled: Compiled::empty(),
@@ -1028,7 +1078,7 @@ pub(crate) mod tests {
         let updated = scanner.update(root, None).unwrap();
         assert!(!Arc::ptr_eq(&catalog.extensions[0], &updated.extensions[0]));
         assert!(Arc::ptr_eq(&catalog.extensions[1], &updated.extensions[1]));
-        let items = updated.extensions[0]
+        let rows = updated.extensions[0]
             .query(
                 "",
                 None,
@@ -1038,13 +1088,7 @@ pub(crate) mod tests {
                 &(Arc::new(dupin_extension_host::NoServices) as _),
             )
             .unwrap();
-        assert_eq!(
-            items[0].view,
-            dupin_plugin_protocol::View::Text {
-                title: "second edit".into(),
-                subtitle: String::new()
-            }
-        );
+        assert_eq!(rows[0].title, "second edit");
 
         fs::write(root.join("b-js/extra.js"), "export {};").unwrap();
         assert!(scanner.update(root, None).is_some());

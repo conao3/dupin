@@ -37,6 +37,8 @@ pub struct Listed {
     /// Whether its keyword reaches it now; one that runs can lose its keyword to another
     /// command.
     pub registered: bool,
+    /// Its catalogue answers the main search too.
+    pub main_search: bool,
 }
 
 pub struct Packages {
@@ -121,6 +123,7 @@ impl Packages {
                 keyword: extension.keyword.clone(),
                 kind,
                 registered: registered(&extension),
+                main_search: extension.default_search,
             })
             .collect()
     }

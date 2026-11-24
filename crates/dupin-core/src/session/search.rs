@@ -22,6 +22,7 @@ pub(super) struct ProviderState {
 pub(super) struct Presentation {
     pub(super) section: Option<Arc<str>>,
     pub(super) detail: Option<Arc<Detail>>,
+    pub(super) detail_when_selected: bool,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -244,6 +245,7 @@ impl Session {
                 items,
                 section,
                 mut details,
+                details_when_selected,
             } = batch;
             let section: Option<Arc<str>> = section.map(Into::into);
             let shown = self.search.presentations.entry(origin.clone()).or_default();
@@ -257,6 +259,7 @@ impl Session {
                         let presentation = Presentation {
                             section: section.clone(),
                             detail,
+                            detail_when_selected: details_when_selected,
                         };
                         shown.insert(item.id.clone(), presentation);
                     } else {

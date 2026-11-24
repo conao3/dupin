@@ -11,9 +11,9 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use dupin_js_runtime::{
-    ActionEffect, Bridge, Control, Diagnostic, Environment, Package, Reply, RunError, Sources,
+    Acted, Bridge, CataloguePage, Control, Diagnostic, Environment, Exports, Package, Reply, Row, RunError,
+    Sources,
 };
-use dupin_plugin_protocol::PluginItem;
 
 use crate::sandbox;
 use crate::wire::{self, Answer, Call, FromHelper, ToHelper};
@@ -103,9 +103,10 @@ fn run(socket: UnixStream) -> io::Result<()> {
                     .hint("Bundle and minify the extension, and leave out code it doesn't run."),
                 }
             }
-            Ok(Outcome::Checked) => Answer::Checked,
+            Ok(Outcome::Checked(exports)) => Answer::Checked { exports },
             Ok(Outcome::Rows(items)) => Answer::Rows { items },
-            Ok(Outcome::Acted(effect)) => Answer::Acted { effect },
+            Ok(Outcome::Catalogue(page)) => Answer::Catalogue { page },
+            Ok(Outcome::Acted(acted)) => Answer::Acted { acted },
             Ok(Outcome::Handled) => Answer::Handled,
             Err(RunError::Cancelled) => Answer::Cancelled,
             Err(RunError::Failed(diagnostic)) => Answer::Failed { diagnostic },
@@ -184,9 +185,10 @@ fn read(
 
 enum Outcome {
     Compiled(Package),
-    Checked,
-    Rows(Vec<PluginItem>),
-    Acted(Option<ActionEffect>),
+    Checked(Exports),
+    Rows(Vec<Row>),
+    Catalogue(CataloguePage),
+    Acted(Acted),
     Handled,
 }
 
@@ -219,10 +221,13 @@ fn execute(
     let package = unsafe { Package::from_compiled(entry, bytecode) }.with_environment(environment);
     match call {
         Call::Compile => unreachable!("compiled above"),
-        Call::Check => package.check(control).map(|()| Outcome::Checked),
+        Call::Check => package.check(control).map(Outcome::Checked),
         Call::Search { query, limit } => package
             .search_with(&query, limit as usize, control, bridge)
             .map(Outcome::Rows),
+        Call::Items { cursor, reason } => package
+            .items(cursor.as_deref(), reason, control)
+            .map(Outcome::Catalogue),
         Call::Action { name, data } => package
             .action(&name, &data.to_string(), control, bridge)
             .map(Outcome::Acted),

@@ -219,13 +219,13 @@ mod tests {
                 &(std::sync::Arc::new(dupin_extension_host::NoServices) as _),
             )
             .unwrap();
-        let views: Vec<_> = items.into_iter().map(|item| item.view).collect();
+        let shown: Vec<_> = items.into_iter().map(|row| (row.title, row.subtitle)).collect();
         assert_eq!(
-            views,
-            [dupin_plugin_protocol::View::Text {
-                title: "Report a problem".into(),
-                subtitle: "Open an issue on GitHub".into(),
-            }]
+            shown,
+            [(
+                "Report a problem".to_owned(),
+                "Open an issue on GitHub".to_owned()
+            )]
         );
     }
 

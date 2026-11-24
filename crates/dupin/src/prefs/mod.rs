@@ -641,6 +641,7 @@ mod tests {
             keyword: title.to_lowercase(),
             kind,
             registered: true,
+            main_search: false,
         };
         state.reflect_extensions(
             vec![
@@ -722,6 +723,7 @@ mod tests {
                 keyword: "wx".into(),
                 kind: crate::extensions::packages::Kind::User,
                 registered: true,
+                main_search: false,
             }],
             Vec::new(),
         );

@@ -11,8 +11,13 @@ use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, Weak};
 use std::time::{Duration, Instant};
 
-use dupin_js_runtime::{ActionEffect, Diagnostic, Environment, RunError, Sources};
-use dupin_plugin_protocol::{self as protocol, PluginItem};
+use std::collections::HashSet;
+
+use dupin_js_runtime::row::Source;
+use dupin_js_runtime::{
+    Acted, CataloguePage, Diagnostic, Environment, Exports, Reason, Row, RunError, Sources,
+};
+use dupin_plugin_protocol::MAX_RESPONSE_BYTES;
 
 use crate::wire::{self, Answer, Call, FromHelper, ToHelper};
 
@@ -78,7 +83,8 @@ impl Compiled {
         }
     }
 
-    fn entry(&self) -> &str {
+    /// The module the package's calls start from, as diagnostics name it.
+    pub fn entry(&self) -> &str {
         &self.entry
     }
 
@@ -117,6 +123,7 @@ struct State {
 enum Work {
     Compile,
     Search,
+    Items,
     Action,
     Event,
 }
@@ -126,6 +133,7 @@ impl Work {
         match self {
             Work::Compile => "compiling the package",
             Work::Search => "search",
+            Work::Items => "items",
             Work::Action => "the action",
             Work::Event => "the event handler",
         }
@@ -135,6 +143,7 @@ impl Work {
         match self {
             Work::Compile => "the compile's",
             Work::Search => "search's",
+            Work::Items => "items'",
             Work::Action => "the action's",
             Work::Event => "the event handler's",
         }
@@ -209,16 +218,41 @@ impl Host {
         })
     }
 
-    /// Links and evaluates `package`'s entry and checks that it exports `search`.
+    /// Links and evaluates `package`'s entry and reports which of `search` and `items` it
+    /// exports.
     pub fn check(
         &self,
         package: &Compiled,
         deadline: Instant,
         is_cancelled: &dyn Fn() -> bool,
-    ) -> Result<(), RunError> {
+    ) -> Result<Exports, RunError> {
         let request = Request::run(package, Call::Check, Work::Search);
         match self.call(request, deadline, is_cancelled, &no_services())? {
-            (Answer::Checked, _) => Ok(()),
+            (Answer::Checked { exports }, _) => Ok(exports),
+            _ => Err(mismatch()),
+        }
+    }
+
+    /// Calls `items({ cursor, reason })` in `package` for the next part of its catalogue. It
+    /// loads before any row is chosen, so it reaches no host service.
+    pub fn items(
+        &self,
+        package: &Compiled,
+        cursor: Option<&str>,
+        reason: Reason,
+        deadline: Instant,
+        is_cancelled: &dyn Fn() -> bool,
+    ) -> Result<CataloguePage, RunError> {
+        let call = Call::Items {
+            cursor: cursor.map(str::to_owned),
+            reason,
+        };
+        let request = Request::run(package, call, Work::Items);
+        match self.call(request, deadline, is_cancelled, &no_services())? {
+            (Answer::Catalogue { page }, _) => {
+                page.validate().map_err(|problem| unshowable(problem, package))?;
+                Ok(page)
+            }
             _ => Err(mismatch()),
         }
     }
@@ -233,7 +267,7 @@ impl Host {
         deadline: Instant,
         is_cancelled: &dyn Fn() -> bool,
         services: &Arc<dyn Services>,
-    ) -> Result<Vec<PluginItem>, RunError> {
+    ) -> Result<Vec<Row>, RunError> {
         let limit = limit.min(dupin_js_runtime::MAX_ROWS) as u32;
         let call = Call::Search {
             query: query.into(),
@@ -246,8 +280,7 @@ impl Host {
             services,
         )? {
             (Answer::Rows { items }, _) => {
-                validate(&items, limit)
-                    .map_err(|diagnostic| RunError::Failed(diagnostic.file(package.entry())))?;
+                validate(&items, limit as usize).map_err(|problem| unshowable(problem, package))?;
                 Ok(items)
             }
             _ => Err(mismatch()),
@@ -265,7 +298,7 @@ impl Host {
         deadline: Instant,
         is_cancelled: &dyn Fn() -> bool,
         services: &Arc<dyn Services>,
-    ) -> Result<Option<ActionEffect>, RunError> {
+    ) -> Result<Acted, RunError> {
         let call = Call::Action {
             name: name.into(),
             data: data.clone(),
@@ -277,7 +310,7 @@ impl Host {
             is_cancelled,
             services,
         )? {
-            (Answer::Acted { effect }, _) => Ok(effect),
+            (Answer::Acted { acted }, _) => Ok(acted),
             _ => Err(mismatch()),
         }
     }
@@ -815,34 +848,34 @@ fn footprint(_pid: u32) -> Option<u64> {
     None
 }
 
-/// The helper is another process, so its rows are checked again here, against the protocol's
-/// limits.
-fn validate(items: &[PluginItem], limit: u32) -> Result<(), Diagnostic> {
-    let request = protocol::Request {
-        version: protocol::VERSION,
-        request_id: "1".into(),
-        generation: "1".into(),
-        command: "extension".into(),
-        query: String::new(),
-        limit,
-        state: None,
-        view: None,
-        context: None,
-    };
-    let response = protocol::Response {
-        version: protocol::VERSION,
-        request_id: "1".into(),
-        generation: "1".into(),
-        outcome: protocol::Outcome::Results {
-            items: items.to_vec(),
-            state: None,
-        },
-    };
-    response.encode(&request).map(drop).map_err(|error| {
+/// The helper is another process, so its rows are checked again here, against the limits the
+/// reader in the helper applied.
+fn validate(items: &[Row], limit: usize) -> Result<(), String> {
+    if items.len() > limit {
+        return Err(format!("{} rows where {limit} were asked for", items.len()));
+    }
+    let mut ids = HashSet::new();
+    let mut bytes = 0;
+    for item in items {
+        item.validate(Source::Search)?;
+        if !ids.insert(item.id.as_str()) {
+            return Err(format!("`{}` is the id of more than one row", item.id));
+        }
+        bytes += item.text_bytes();
+    }
+    if bytes > MAX_RESPONSE_BYTES {
+        return Err("more text than an answer may carry".into());
+    }
+    Ok(())
+}
+
+fn unshowable(problem: String, package: &Compiled) -> RunError {
+    RunError::Failed(
         host_error(format!(
-            "the extension host returned rows Dupin can't show: {error}"
+            "the extension host returned rows Dupin can't show: {problem}"
         ))
-    })
+        .file(package.entry()),
+    )
 }
 
 /// A helper's answer as the call's result: its own failure or cancellation becomes the error.
@@ -874,6 +907,9 @@ fn deadline_passed(work: Work, entry: &str) -> Diagnostic {
         }
         Work::Search => {
             "Make search return sooner: it runs as the user types, and Dupin stops it after 2 seconds."
+        }
+        Work::Items => {
+            "Make items return sooner: Dupin stops loading a catalogue 2 seconds after it asks, counting every part."
         }
         Work::Action | Work::Event => {
             "Do less in one call: Dupin stops actions and event handlers at their deadline."

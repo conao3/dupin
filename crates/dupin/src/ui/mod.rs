@@ -24,7 +24,6 @@ mod window_management;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, RwLock};
@@ -98,7 +97,7 @@ pub struct Ui {
     quick_look: Rc<RefCell<Option<Previewer>>>,
     acknowledged_config: Config,
     bindings_applied: bool,
-    pub icons: HashMap<PathBuf, Image>,
+    pub icons: HashMap<dupin_core::Icon, Image>,
     /// Between `show` and `hide`: the backdrop animates only then.
     pub shown: bool,
     /// The clock when the panel last showed, and when the query last changed.
