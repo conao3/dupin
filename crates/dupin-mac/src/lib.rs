@@ -18,6 +18,7 @@ pub mod input_source;
 pub mod keychain;
 pub mod login_item;
 pub mod paste;
+pub mod pick;
 pub mod privacy;
 pub mod quick_look;
 mod recent;
