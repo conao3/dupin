@@ -201,8 +201,8 @@ fn parses_as_web_url(probe: &str) -> bool {
 
 /// Whether `probe`, already known to start `http://` or `https://` with an authority that has
 /// no `@`, is a URL by RFC 3986: only its unreserved and reserved characters and
-/// percent-encodings, and a non-empty host, or an IPv6 literal in brackets, with at most a
-/// numeric port.
+/// percent-encodings, and a non-empty host with no colon, or an IPv6 literal in brackets,
+/// with at most a numeric port.
 /// <https://www.rfc-editor.org/rfc/rfc3986#appendix-A>
 #[cfg(not(target_os = "macos"))]
 fn parses_as_web_url(probe: &str) -> bool {
@@ -238,7 +238,7 @@ fn parses_as_web_url(probe: &str) -> bool {
         Some(literal) => literal
             .strip_suffix(']')
             .is_some_and(|ip| ip.parse::<std::net::Ipv6Addr>().is_ok()),
-        None => !host.is_empty() && !host.contains(['[', ']']),
+        None => !host.is_empty() && !host.contains(['[', ']', ':']),
     };
     host_is_valid && port.is_none_or(|port| port.bytes().all(|b| b.is_ascii_digit()))
 }
@@ -559,6 +559,8 @@ mod tests {
             "https://[::1/?q=x",
             "https://exa]mple.com/?q=x",
             "https://example.com:80a/?q=x",
+            "https://example.com:bad:80/?q=x",
+            "https://example.com::80/?q=x",
         ] {
             assert!(!super::parses_as_web_url(invalid), "{invalid}");
         }
