@@ -1,6 +1,11 @@
 {
   perSystem =
-    { config, pkgs, ... }:
+    {
+      config,
+      lib,
+      pkgs,
+      ...
+    }:
     {
       devShells.default = pkgs.mkShell {
         inputsFrom = [ config.packages.dupin.baseline ];
@@ -17,9 +22,7 @@
             # Type-checks extensions/ as `checks.extensions-typecheck` does.
             typescript
             config.packages.pnpm
-            config.packages.blacksmith
             just
-            config.packages.cargo-hawk
             nufmt
             config.treefmt.build.wrapper
             typos
@@ -27,6 +30,10 @@
             actionlint
             zizmor
             gitleaks
+          ]
+          ++ lib.optionals pkgs.stdenv.hostPlatform.isDarwin [
+            config.packages.blacksmith
+            config.packages.cargo-hawk
           ]
           ++ config.pre-commit.settings.enabledPackages;
         # Installs the pre-commit and pre-push hooks from nix/git-hooks.nix.
