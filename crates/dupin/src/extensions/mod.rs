@@ -27,7 +27,7 @@ use std::time::{Instant, SystemTime};
 
 use dupin_core::{Batch, Page};
 use dupin_extension_bridge::{Call, Capabilities, PackageId, Revision};
-use dupin_extension_host::{Compiled, Host, Services};
+use dupin_extension_host::{Compiled, Host, Services, Trust};
 use dupin_js_runtime::{
     Acted, CataloguePage, Diagnostic, Exports, Handled, Preferences, Reason, Row, RunError, Sources,
 };
@@ -246,7 +246,8 @@ fn views_unsupported() -> RunError {
     ))
 }
 
-/// The one extension host every JavaScript extension shares, started on the first query.
+/// The one extension host every JavaScript extension shares, which starts a trust domain's
+/// helper on that domain's first query.
 fn host() -> &'static Host {
     static HOST: OnceLock<Host> = OnceLock::new();
     HOST.get_or_init(|| Host::fixed(Box::new(helper_command), headless_environment()))
@@ -459,7 +460,10 @@ fn load(
     previous: Option<LoadedExtension>,
     bundled: bool,
 ) -> Result<LoadedExtension, Diagnostic> {
-    load_with(folder, previous, bundled, compile)
+    let trust = if bundled { Trust::Bundled } else { Trust::Own };
+    load_with(folder, previous, bundled, |folder, entry, previous| {
+        compile(folder, entry, previous, trust)
+    })
 }
 
 /// `compile` reads the package's files only after they are stamped, so an edit that lands while
@@ -558,6 +562,7 @@ fn compile(
     folder: &Path,
     entry: &str,
     previous: Option<&LoadedExtension>,
+    trust: Trust,
 ) -> Result<(Compiled, blake3::Hash), Diagnostic> {
     let sources = Sources::read(folder, entry)?;
     let content = content_hash(&sources);
@@ -565,7 +570,7 @@ fn compile(
         return Ok((previous.extension.compiled.clone(), content));
     }
     let compiled = host()
-        .compile(&sources, QUERY_DEADLINE, &|| false)
+        .compile(&sources, trust, QUERY_DEADLINE, &|| false)
         .map_err(|error| match error {
             RunError::Failed(diagnostic) => diagnostic,
             RunError::Cancelled => {
@@ -623,7 +628,11 @@ pub fn watch(
 ) -> std::io::Result<Watch> {
     let integrity: Option<Integrity> = match origin {
         Origin::User => crate::extension_install::lock_path().map(|lock| {
-            let mut integrity = dupin_extension_install::Integrity::new(lock);
+            let bundled = bundled::directory()
+                .map(|directory| bundled::packages(&directory))
+                .unwrap_or_default();
+            let names = bundled.into_iter().map(|(_, name, _)| name).collect();
+            let mut integrity = dupin_extension_install::Integrity::new(lock, names);
             Box::new(move |folder: &Path| integrity.check(folder)) as _
         }),
         Origin::Bundled => {
@@ -1039,7 +1048,7 @@ pub(crate) mod tests {
             },
         );
         lock.write(&lock_path).unwrap();
-        let mut integrity = dupin_extension_install::Integrity::new(lock_path);
+        let mut integrity = dupin_extension_install::Integrity::new(lock_path, Default::default());
         let mut scanner = Scanner {
             integrity: Some(Box::new(move |folder: &Path| integrity.check(folder))),
             ..Scanner::default()
@@ -1250,7 +1259,7 @@ pub(crate) mod tests {
         let folder = root.join("js");
         let edited = folder.join("main.js");
         let loaded = load_with(&folder, None, false, |folder, entry, previous| {
-            let compiled = compile(folder, entry, previous);
+            let compiled = compile(folder, entry, previous, Trust::Own);
             fs::write(&edited, "export const search = () => [{ title: 'new edit' }];").unwrap();
             compiled
         })
