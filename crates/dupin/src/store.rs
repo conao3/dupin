@@ -1,4 +1,5 @@
-//! The history file, `~/Library/Application Support/Dupin/history.json`.
+//! The history file: `~/Library/Application Support/Dupin/history.json` on macOS,
+//! `$XDG_STATE_HOME/dupin/history.json` on Linux.
 
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Sender};
@@ -6,15 +7,29 @@ use std::sync::mpsc::{self, Sender};
 use dupin_core::History;
 
 /// `~/Library/Application Support/Dupin`, where Dupin keeps what it learns about its user.
+#[cfg(target_os = "macos")]
 pub fn support_dir() -> Option<PathBuf> {
     std::env::var_os("HOME").map(|home| PathBuf::from(home).join("Library/Application Support/Dupin"))
 }
 
+/// `$XDG_STATE_HOME/dupin`, where Dupin keeps what it learns about its user.
+#[cfg(target_os = "linux")]
+pub fn support_dir() -> Option<PathBuf> {
+    crate::platform::dirs::state()
+}
+
+#[cfg(target_os = "macos")]
 pub fn data_dir() -> Option<PathBuf> {
     std::env::var_os("XDG_DATA_HOME")
         .filter(|value| !value.is_empty())
         .map(|base| PathBuf::from(base).join("dupin"))
         .or_else(support_dir)
+}
+
+/// `$XDG_DATA_HOME/dupin`, or `~/.local/share/dupin`.
+#[cfg(target_os = "linux")]
+pub fn data_dir() -> Option<PathBuf> {
+    crate::platform::dirs::data()
 }
 
 pub const FILE: &str = "history.json";
